@@ -1,0 +1,52 @@
+{
+  "name": "ferry-mcp",
+  "version": "0.1.0",
+  "description": "Ferry — an MCP server that lets AI agents build beautiful, animated presentations that explain codebase changes.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-review",
+    "presentation",
+    "claude"
+  ],
+  "homepage": "https://github.com/danowicz/ferry-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danowicz/ferry-mcp.git"
+  },
+  "license": "MIT",
+  "author": "Alexander Danowicz",
+  "type": "module",
+  "bin": {
+    "ferry": "bin/ferry.js"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "serve": "node src/cli.ts serve",
+    "build": "node src/cli.ts build",
+    "demo": "node scripts/demo.ts",
+    "check": "tsc --noEmit -p . && tsc --noEmit -p viewer",
+    "test": "node scripts/smoke.ts",
+    "record": "node scripts/record.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "diff": "^9.0.0",
+    "esbuild": "^0.28.2",
+    "lucide-static": "^1.52.0",
+    "marked": "^18.0.14",
+    "shiki": "^4.5.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "playwright-core": "^1.63.0",
+    "typescript": "^7.0.2"
+  }
+}
