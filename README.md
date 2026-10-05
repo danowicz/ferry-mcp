@@ -1,6 +1,6 @@
-# Ferry
+<img src="docs/banner.png" alt="Ferry — Code changes, explained." width="100%">
 
-**Code changes, explained.** Ferry is an MCP server that lets AI agents build animated, narrated presentations of codebase changes. The presentations open in your browser and update live while the agent builds them.
+Ferry is an MCP server that lets AI agents build animated, narrated presentations of codebase changes. The presentations open in your browser and update live while the agent builds them.
 
 [![Ferry demo: an agent builds a deck live, then walks a sequence diagram and a stepped diff](docs/demo.gif)](docs/demo.mp4)
 
@@ -108,6 +108,7 @@ node bin/ferry.js list                  # saved decks
 node bin/ferry.js export <deck-id> [out.html]
 npm run demo                            # builds the showcase deck through MCP
 npm run record                          # re-records docs/demo.mp4 (needs ffmpeg and Playwright's Chromium)
+npm run banner                          # re-renders docs/banner.png
 npm test                                # end-to-end check of every tool
 ```
 
@@ -128,6 +129,6 @@ viewer/src/    presentation app (bundled with esbuild on demand)
   feedback.ts    side panel: chat tab, change-plan tab, pinning
   markdown.ts    safe Markdown for chat replies
   slides/        one view per slide type
-scripts/       demo, smoke test, screenshot walker, demo-video recorder
-docs/          demo video and GIF
+scripts/       demo, smoke test, screenshot walker, demo-video recorder, banner
+docs/          banner, demo video and GIF
 ```
