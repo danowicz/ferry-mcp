@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ferry serve | build | export <deck-id> [out.html] | list | delete <deck-id>… | mcp
+// ferry serve | build | export <deck-id> [out.html] | list | delete <deck-id>… | mcp [--scope <deck-id>]
 import { buildViewer } from './build.ts'
 import { ensureServer, holdOpen, openInBrowser } from './server.ts'
 import { exportDeck } from './export.ts'
@@ -40,6 +40,7 @@ switch (command) {
     }
     break
   case 'mcp':
+    if (args[0] === '--scope' && args[1]) process.env.FERRY_DECK_SCOPE = args[1]
     await import('./index.ts')
     break
   default:

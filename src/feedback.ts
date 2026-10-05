@@ -30,6 +30,8 @@ export interface FeedbackItem {
   /** 0-based step the viewer was on. */
   step?: number
   target?: FeedbackTarget
+  /** Set when the user sent their plan deck: implement it. */
+  plan?: { id: string; revision: number }
   text: string
   thread: FeedbackMessage[]
 }
@@ -93,7 +95,7 @@ export function updateFeedback<T>(deckId: string, change: (data: FeedbackFile) =
   })
 }
 
-export function newItem(fields: Pick<FeedbackItem, 'text' | 'slideId' | 'step' | 'target'> & { status?: FeedbackStatus }): FeedbackItem {
+export function newItem(fields: Pick<FeedbackItem, 'text' | 'slideId' | 'step' | 'target' | 'plan'> & { status?: FeedbackStatus }): FeedbackItem {
   const now = new Date().toISOString()
   return {
     id: `fb-${randomBytes(3).toString('hex')}`,
@@ -103,6 +105,7 @@ export function newItem(fields: Pick<FeedbackItem, 'text' | 'slideId' | 'step' |
     slideId: fields.slideId,
     step: fields.step,
     target: fields.target,
+    plan: fields.plan,
     text: fields.text.trim().slice(0, 4000),
     thread: [],
   }
@@ -123,7 +126,7 @@ export async function isListening(deckId: string): Promise<boolean> {
 
 // ── agent-facing change plan: code changes requested while reviewing ──────
 
-const pending = (item: FeedbackItem) => item.status === 'open' || item.status === 'working'
+export const pending = (item: FeedbackItem) => item.status === 'open' || item.status === 'working'
 
 export function describeItem(deck: StoredDeck, item: FeedbackItem, n: number): string {
   const lines: string[] = []
@@ -143,10 +146,12 @@ export function describeItem(deck: StoredDeck, item: FeedbackItem, n: number): s
   return lines.join('\n')
 }
 
-export function changePlan(deck: StoredDeck, items: FeedbackItem[], then = 'Finally call wait_for_feedback again to keep reviewing with the user.'): string {
+export function changePlan(deck: StoredDeck, items: FeedbackItem[], plan?: StoredDeck, then = 'Finally call wait_for_feedback again to keep reviewing with the user.'): string {
   const list = items.filter(pending)
   if (!list.length) return `No pending feedback on deck "${deck.title}" (${deck.id}).`
-  const slideIds = [...new Set(list.map((i) => i.slideId).filter(Boolean))] as string[]
+  const planItem = plan?.slides.length ? list.find((i) => i.plan) : undefined
+  const requests = list.filter((i) => !i.plan)
+  const slideIds = [...new Set(requests.map((i) => i.slideId).filter(Boolean))] as string[]
   const sources = slideIds.flatMap((id) => {
     const source = deck.source.find((s) => s.id === id)
     return source ? [`[${id}]\n${JSON.stringify(source)}`] : []
@@ -154,11 +159,15 @@ export function changePlan(deck: StoredDeck, items: FeedbackItem[], then = 'Fina
   const { repo, base, head } = deckGit(deck)
   const range = base || head ? `${base ?? 'HEAD'} → ${head ?? 'working tree'}` : 'its changes'
   const branch = head ? ` Check that ${head} is checked out first; if it isn't, ask with reply_feedback before editing.` : ''
+  const outline = plan?.slides.map((s, i) => `${i + 1}. ${s.type}${s.title ? ` "${s.title.replace(/\*/g, '')}"` : ''}`).join('\n')
   return [
-    `Code change plan from reviewing deck "${deck.title}" (${deck.id}) — ${list.length} request${list.length === 1 ? '' : 's'} from the Ferry viewer. The deck explains ${range} in ${repo ?? 'the repository it was built from'}. These are changes to that codebase, not to the slides.`,
-    list.map((item, i) => describeItem(deck, item, i + 1)).join('\n\n'),
+    `Code changes requested from the Ferry viewer while reviewing deck "${deck.title}" (${deck.id}). The deck explains ${range} in ${repo ?? 'the repository it was built from'}. Make these changes in that codebase, not in the slides.`,
+    planItem && plan
+      ? `[${planItem.id}] Implement the plan the user built and approved: deck "${plan.title}" (${plan.id}), ${plan.slides.length} slides.\n${outline}\n\nPlan slides (authoring JSON; hand-written diffs show the intended code):\n${plan.source.map((s) => JSON.stringify(s)).join('\n')}`
+      : '',
+    requests.length ? `Requests:\n${requests.map((item, i) => describeItem(deck, item, i + 1)).join('\n\n')}` : '',
     sources.length ? `Authoring JSON of the slides the requests point at (use it to find the code):\n${sources.join('\n\n')}` : '',
-    `Next: make each change in the code, on the checked-out branch, without committing.${branch} Leave the slides alone. Then call resolve_feedback with a one-line reply per item — "done" with what changed (which files), or "declined" with why. Ask with reply_feedback if a request is unclear. ${then}`,
+    `Next: make the changes in the code${planItem ? ' as the plan describes, adapting its diffs to the real code where needed' : ''}, on the checked-out branch, without committing.${branch} Don't edit the slides. Then call resolve_feedback with a reply per item — "done" with what changed (which files), or "declined" with why. Ask with reply_feedback if something is unclear. ${then}`,
   ]
     .filter(Boolean)
     .join('\n\n')

@@ -231,4 +231,8 @@ export interface CompiledDeck {
   updatedAt: string
   revision: number
   slides: Slide[]
+  /** Set on plan decks: the deck whose code this plan proposes to change. */
+  planFor?: string
+  /** Served with a reviewed deck: its plan deck, when one exists. */
+  plan?: { id: string; slideCount: number; updatedAt: string }
 }

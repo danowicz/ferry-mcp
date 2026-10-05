@@ -4,7 +4,7 @@ Workflow:
 1. inspect_changes (repo, base, head) to see changed files and their numbered changes.
 2. create_deck, then add_slides with a story: title → points overview → per key change: behavior (sequence or flow) then code (diff with steps, focus, callouts) → points checklist for review.
 3. open_deck to show it. Fix any warnings returned by add_slides.
-4. Review loop: call wait_for_feedback. The user reviews the code in the viewer (C key) and sends a change plan: code changes for the repository. Make them in the code, resolve_feedback with a reply per item, and wait again until they're done.
+4. Review loop: call wait_for_feedback. In the viewer (C key) the user plans code changes with the chat in Plan mode, which drafts them as a plan deck, then sends the plan. Implement it in the code, resolve_feedback with a reply, and wait again until they're done.
 Shortcut: draft_deck_from_git builds a skeleton deck that you then refine with update_slide.
 Call authoring_guide once for slide types and craft rules.`
 
@@ -115,10 +115,10 @@ Edge ids are "from->to". Elements listed in a step's \`show\` are hidden until t
 
 ## Review loop
 
-People review the change through the deck: **C** opens the feedback panel, the crosshair pins a comment to a code line, node, row, or any element, and comments collect into a *change plan* they send to you. A change plan asks for **code changes** in the repository the deck explains, not slide edits (slide edits happen in the viewer's Chat tab).
+People review the change through the deck, then plan what should change next. **C** opens the panel; in the chat's **Plan** mode they describe code changes (pinning code lines with the crosshair), and Ferry's built-in agent drafts them as a *plan deck* (deck id \`<deck_id>-plan\`): slides proposing the changes with hand-written diffs. They revise it until it's right, then send it to you. Nothing in the repository changes until then.
 
-1. \`wait_for_feedback\` blocks until a plan arrives (the viewer shows that you are listening) and returns each request with its slide, step, pinned element, and the slide's authoring JSON. \`get_feedback\` returns pending requests without waiting.
-2. Make each change in the code, on the checked-out branch, without committing. The slide, step, and pinned element tell you where the reviewer was looking.
+1. \`wait_for_feedback\` blocks until a plan arrives (the viewer shows that you are listening) and returns it: the plan's outline and every slide's authoring JSON, plus any individual requests with their slide, step, and pinned element. \`get_feedback\` returns pending items without waiting.
+2. Implement the plan in the code, on the checked-out branch, without committing. Its diffs show intent; adapt them to the real code where needed.
 3. \`resolve_feedback\` with a one-line reply per item ("done": what changed, which files; "declined": why). Replies appear in the viewer next to the request.
 4. If a request is ambiguous, \`reply_feedback\` asks the user; their answer comes back through \`wait_for_feedback\`.
 5. Call \`wait_for_feedback\` again until the user is happy or it times out.

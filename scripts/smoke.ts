@@ -102,7 +102,7 @@ assert.equal((await post('send', {})).sent, 1)
 const plan = await waiting
 assert.match(plan, new RegExp(`\\[${item.id}\\] Slide 1 "Bad callout"`))
 assert.match(plan, /Pinned to slide title: Bad callout/)
-assert.match(plan, /Code change plan .* These are changes to that codebase, not to the slides\./)
+assert.match(plan, /Code changes requested from the Ferry viewer .* Make these changes in that codebase, not in the slides\./)
 assert.match(plan, /Authoring JSON of the slides the requests point at/)
 ok('wait_for_feedback receives a change plan sent from the viewer API')
 
@@ -121,19 +121,47 @@ assert.equal((await fetch(chatApi, { method: 'POST', headers: { 'content-type': 
 assert.equal((await fetch(chatApi, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"text":"hi"}' })).status, 400)
 ok('chat API guards (empty message, cross-origin)')
 
-// No agent listening: Send hands the plan to the viewer's built-in agent.
+// Plan mode: the chat drafts a plan deck, and nothing reaches the code until the plan is sent.
+const planId = `${id}-plan`
 const statusOf = async (fid: string) => (await fetch(api).then((r) => r.json())).items.find((i: { id: string }) => i.id === fid)?.status
-const queued = await post('', { text: 'Tighten the subtitle', slideId: 'bad-callout', step: 0 })
+const idle = async () => {
+  for (let i = 0; i < 50 && (await fetch(chatApi).then((r) => r.json())).running; i++) await new Promise((resolve) => setTimeout(resolve, 100))
+}
+assert.match((await post('send', {})).error, /Nothing to send yet/)
+const chatPost = (body: object) => fetch(chatApi, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+assert.equal((await chatPost({ text: 'Make the retry interval configurable', mode: 'plan', viewing: id, slideId: 'bad-callout', step: 0 })).status, 201)
+await idle()
+const planning = JSON.parse(readFileSync(fakeLog, 'utf8'))
+const toolsOf = (args: string[]) => args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--disallowedTools'))
+assert.ok(toolsOf(planning.args).includes('mcp__ferry__add_slides') && !toolsOf(planning.args).includes('Edit'))
+assert.ok(planning.args[planning.args.indexOf('--mcp-config') + 1].includes(`"--scope","${planId}"`))
+assert.match(planning.input, /^\[Viewing slide 1\//)
+assert.match(await call('get_deck', { deck_id: planId }), /Plan: /)
+const scoped = await connect({ FERRY_HOME: home, FERRY_PORT: '4790', FERRY_DECK_SCOPE: planId })
+await assert.rejects(scoped.call('update_deck', { deck_id: id, title: 'Hijacked' }), /can only edit deck/)
+await scoped.client.close()
+ok('Plan mode creates the plan deck, and its agent can only edit that deck, never code')
+
+// Stand in for the planning agent, then send the plan with no agent listening.
+await call('add_slides', {
+  deck_id: planId,
+  slides: [
+    { type: 'title', title: 'Make the retry interval configurable' },
+    { type: 'diff', title: 'Read it from the environment', file: 'src/server/bind.ts', before: 'const RETRY_INTERVAL = 100\n', after: 'const RETRY_INTERVAL = Number(process.env.RETRY_INTERVAL ?? 100)\n' },
+  ],
+})
+assert.deepEqual((await fetch(new URL(`/api/decks/${id}`, url)).then((r) => r.json())).plan?.slideCount, 2)
 const handed = await post('send', {})
 assert.deepEqual([handed.sent, handed.applying], [1, 1])
-for (let i = 0; i < 50 && (await statusOf(queued.id)) !== 'open'; i++) await new Promise((resolve) => setTimeout(resolve, 100))
-assert.equal(await statusOf(queued.id), 'open') // the stand-in resolved nothing, so the request reopens
+assert.match((await post('send', {})).error, /already with the agent|still answering/)
+const planItem = (await fetch(api).then((r) => r.json())).items.find((i: { plan?: unknown }) => i.plan)
+await idle()
+assert.equal(await statusOf(planItem.id), 'open') // the stand-in resolved nothing, so the plan can be sent again
 const asked = JSON.parse(readFileSync(fakeLog, 'utf8'))
-assert.ok(asked.input.includes(`[${queued.id}] Slide 1 "Bad callout"`) && asked.input.includes('sum up the code changes'))
-const allowed = asked.args.slice(asked.args.indexOf('--allowedTools') + 1, asked.args.indexOf('--disallowedTools'))
-assert.ok(allowed.includes('Edit') && allowed.includes('mcp__ferry__resolve_feedback') && !allowed.includes('mcp__ferry__update_slide'))
-assert.match((await fetch(chatApi).then((r) => r.json())).messages[0].text, /Make the code changes in my plan \(1 request\)/)
-ok('Send with no agent listening hands the code changes to the built-in agent; unresolved requests reopen')
+assert.ok(asked.input.includes(`[${planItem.id}] Implement the plan`) && asked.input.includes('Read it from the environment') && asked.input.includes('sum up the code changes'))
+assert.ok(toolsOf(asked.args).includes('Edit') && toolsOf(asked.args).includes('mcp__ferry__resolve_feedback') && !toolsOf(asked.args).includes('mcp__ferry__update_slide'))
+assert.ok((await fetch(chatApi).then((r) => r.json())).messages.some((m: { text: string; mode?: string }) => m.mode === 'implement' && /Implement my plan/.test(m.text)))
+ok('Send plan: the built-in agent implements it when no agent is listening; unfinished plans reopen')
 
 const deckApi = new URL(`/api/decks/${id}`, url)
 assert.equal((await fetch(deckApi, { method: 'DELETE' })).status, 400)
@@ -145,7 +173,7 @@ const viaCli = await spare('Deleted from the CLI')
 const cli = execFileSync(process.execPath, [join(import.meta.dirname, '..', 'bin', 'ferry.js'), 'delete', viaCli], { env: { ...process.env, FERRY_HOME: home }, encoding: 'utf8' })
 assert.match(cli, /Deleted .*Deleted from the CLI/)
 assert.match(await call('delete_deck', { deck_id: id }), /Deleted deck/)
-assert.ok(!existsSync(join(home, 'decks', `${id}.json`)) && !existsSync(join(home, 'feedback', `${id}.json`)))
+assert.ok(!existsSync(join(home, 'decks', `${id}.json`)) && !existsSync(join(home, 'decks', `${planId}.json`)) && !existsSync(join(home, 'feedback', `${id}.json`)))
 assert.equal((await fetch(deckApi)).status, 404)
 assert.doesNotMatch(await call('list_decks'), new RegExp(`${id}|${viaViewer}|${viaCli}`))
 ok('delete_deck, ferry delete and the viewer DELETE route (same-origin JSON only)')

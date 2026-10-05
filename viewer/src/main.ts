@@ -65,6 +65,7 @@ class Player {
   private progress = h('div', { class: 'progress' })
   private counter = h('div', { class: 'counter' })
   private barTitle = h('div', { class: 'bar-title' })
+  private planButton = h('button', { class: 'bar-plan' })
   private live = h('span', { class: 'live', title: 'Live: updates as the agent edits this deck' })
   private notes = h('div', { class: 'notes-drawer' })
   private overview = h('div', { class: 'overview' })
@@ -77,6 +78,7 @@ class Player {
   private voiceTimer = 0
   private toastTimer = 0
   private toastTarget = -1
+  private toastAction: (() => void) | null = null
 
   constructor(deck: CompiledDeck, live = true) {
     this.deck = deck
@@ -87,7 +89,7 @@ class Player {
     const buttons = h(
       'div',
       { class: 'bar-buttons' },
-      live ? (this.feedbackButton = this.button('message', 'Chat & change plan (C)', () => this.feedback?.toggle())) : null,
+      live ? (this.feedbackButton = this.button('message', 'Chat & plan (C)', () => this.feedback?.toggle())) : null,
       this.button('grid', 'Overview (O)', () => this.toggleOverview()),
       this.button('notes', 'Notes (N)', () => this.toggleNotes()),
       this.button('volume', 'Voice narration (V)', () => this.toggleVoice()),
@@ -95,13 +97,20 @@ class Player {
       this.button('maximize', 'Fullscreen (F)', () => this.fullscreen()),
       this.button('keyboard', 'Shortcuts (?)', () => this.toggleHelp()),
     )
-    const bar = h('footer', { class: 'bar' }, h('div', { class: 'bar-left' }, h('span', { class: 'bar-logo', html: LOGO }), this.barTitle), this.progress, h('div', { class: 'bar-right' }, this.live, this.counter, buttons))
+    const bar = h('footer', { class: 'bar' }, h('div', { class: 'bar-left' }, h('span', { class: 'bar-logo', html: LOGO }), this.barTitle, live ? this.planButton : null), this.progress, h('div', { class: 'bar-right' }, this.live, this.counter, buttons))
+    this.planButton.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (this.deck.planFor) this.openDeck(this.deck.planFor)
+      else if (this.deck.plan?.slideCount) this.openDeck(this.deck.plan.id)
+      else this.feedback?.startPlanning()
+    })
     this.stage.append(h('div', { class: 'bg' }, h('div', { class: 'bg-glow' }), h('div', { class: 'bg-grid' }), h('div', { class: 'grain' })), this.slides, bar)
     this.viewport.append(this.stage)
     this.help.innerHTML = HELP
     this.help.addEventListener('click', () => this.toggleHelp(false))
     this.toast.addEventListener('click', () => {
-      if (this.toastTarget >= 0) this.goSlide(this.toastTarget, 0, 'jump')
+      if (this.toastAction) this.toastAction()
+      else if (this.toastTarget >= 0) this.goSlide(this.toastTarget, 0, 'jump')
       this.toast.classList.remove('on')
     })
     this.voice.addEventListener('click', () => this.toggleVoice(false))
@@ -121,6 +130,7 @@ class Player {
         stage: this.stage,
         viewport: this.viewport,
         goTo: (i, k) => this.goSlide(i, k, 'jump'),
+        openDeck: (id, slide) => this.openDeck(id, slide),
         layoutChanged: () => {
           // Follow the viewport while the panel slides in or out.
           const end = performance.now() + 450
@@ -138,6 +148,7 @@ class Player {
       })
       app.firstElementChild!.append(this.feedback.el)
       this.feedback.refresh()
+      this.feedback.restore()
     }
 
     this.renderBar()
@@ -255,8 +266,26 @@ class Player {
     requestAnimationFrame(tick)
   }
 
+  /** Switches between the reviewed deck and its plan, keeping the panel open. */
+  openDeck(id: string, slide?: number) {
+    location.href = `/d/${id}${slide !== undefined ? `#${slide + 1}` : ''}`
+  }
+
+  /** The plan deck changed while the reviewed deck is on screen. */
+  setPlan(plan: CompiledDeck['plan']) {
+    const before = this.deck.plan?.slideCount ?? 0
+    this.deck.plan = plan
+    this.renderBar()
+    this.feedback?.refresh()
+    if (plan && plan.slideCount !== before) this.flash(`Plan updated · ${plan.slideCount} slide${plan.slideCount === 1 ? '' : 's'}`, -1, () => this.openDeck(plan.id), 'click to view')
+  }
+
   renderBar() {
     const { deck } = this
+    const planned = deck.plan?.slideCount ?? 0
+    this.planButton.classList.toggle('back', !!deck.planFor)
+    this.planButton.innerHTML = deck.planFor ? `${icon('left', 14)}<span>Back to the change</span>` : `${icon('notes', 14)}<span>${planned ? 'Plan' : 'Plan changes'}</span>${planned ? `<em>${planned}</em>` : ''}`
+    this.planButton.title = deck.planFor ? 'Back to the deck this plan changes' : planned ? 'Open the plan slides' : 'Plan code changes with the chat in Plan mode'
     this.barTitle.innerHTML = `<b>${escape(deck.title)}</b>${deck.repo || deck.ref ? `<span>${escape([deck.repo, deck.ref].filter(Boolean).join(' · '))}</span>` : ''}`
     const n = deck.slides.length
     if (this.progress.childElementCount !== n) {
@@ -461,9 +490,10 @@ class Player {
     }
   }
 
-  flash(message: string, target = -1) {
+  flash(message: string, target = -1, action: (() => void) | null = null, hint = '') {
     this.toastTarget = target
-    this.toast.innerHTML = `<span class="toast-dot"></span>${escape(message)}${target >= 0 && target !== this.index ? '<small>click to view</small>' : ''}`
+    this.toastAction = action
+    this.toast.innerHTML = `<span class="toast-dot"></span>${escape(message)}${hint ? `<small>${escape(hint)}</small>` : target >= 0 && target !== this.index ? '<small>click to view</small>' : ''}`
     this.toast.classList.add('on')
     clearTimeout(this.toastTimer)
     this.toastTimer = window.setTimeout(() => this.toast.classList.remove('on'), 2600)
@@ -492,7 +522,8 @@ const HELP = `<div class="help-card"><h2>Keyboard</h2><dl>
 <dt><kbd>→</kbd><kbd>Space</kbd></dt><dd>Next step</dd>
 <dt><kbd>←</kbd></dt><dd>Previous step</dd>
 <dt><kbd>↓</kbd><kbd>↑</kbd></dt><dd>Next / previous slide</dd>
-<dt><kbd>C</kbd></dt><dd>Chat with the agent · change plan</dd>
+<dt><kbd>C</kbd></dt><dd>Chat with the agent · plan</dd>
+<dt><kbd>⇧</kbd><kbd>Tab</kbd></dt><dd>Switch the chat between Ask and Plan</dd>
 <dt><kbd>P</kbd></dt><dd>Pin a comment to an element (panel open)</dd>
 <dt><kbd>O</kbd></dt><dd>Overview</dd>
 <dt><kbd>N</kbd></dt><dd>Speaker notes</dd>
@@ -514,6 +545,7 @@ interface DeckSummary {
   theme: ThemeName
   updatedAt: string
   slideCount: number
+  planFor?: string
 }
 
 function ago(iso: string): string {
@@ -545,14 +577,17 @@ function missing(title: string, message: string) {
 async function home() {
   setTheme((localStorage.getItem('ferry-theme:home') as ThemeName) ?? 'midnight')
   document.title = 'Ferry'
-  const [decks, health] = await Promise.all([fetch('/api/decks').then((r) => r.json() as Promise<DeckSummary[]>), fetch('/api/health').then((r) => r.json())])
+  const [all, health] = await Promise.all([fetch('/api/decks').then((r) => r.json() as Promise<DeckSummary[]>), fetch('/api/health').then((r) => r.json())])
   const grid = h('div', { class: 'home-grid' })
+  const plans = new Map(all.filter((d) => d.planFor).map((d) => [d.planFor!, d]))
+  const decks = all.filter((d) => !d.planFor)
   decks.forEach((deck, i) => {
+    const plan = plans.get(deck.id)
     const remove = h('button', { class: 'hc-delete', title: 'Delete deck', 'aria-label': `Delete “${deck.title}”`, html: `${icon('trash', 15)}<span>Delete?</span>` })
     const card = h(
       'div',
       { class: 'home-card', 'data-theme': deck.theme, style: `--i:${i}` },
-      h('div', { class: 'hc-art' }, h('div', { class: 'aurora' }, h('i'), h('i')), h('span', { class: 'hc-count' }, `${deck.slideCount} slides`), remove),
+      h('div', { class: 'hc-art' }, h('div', { class: 'aurora' }, h('i'), h('i')), h('span', { class: 'hc-count' }, `${deck.slideCount} slides${plan?.slideCount ? ` · plan ${plan.slideCount}` : ''}`), remove),
       h('div', { class: 'hc-body' }, h('h2', {}, h('a', { class: 'hc-link', href: `/d/${deck.id}` }, deck.title)), deck.subtitle ? h('p', {}, deck.subtitle) : null, h('div', { class: 'hc-meta' }, h('span', {}, [deck.repo, deck.ref].filter(Boolean).join(' · ') || deck.id), h('span', {}, ago(deck.updatedAt)))),
     )
     remove.addEventListener('click', () => deleteCard(card, remove, deck.id))
@@ -624,12 +659,18 @@ async function boot() {
   events.onopen = () => player.setLive(true)
   events.onerror = () => player.setLive(false)
   let revision = player.deck.revision
+  // Chat, plan delivery and presence belong to the reviewed deck, also while its plan is on screen.
+  const review = player.deck.planFor ?? id
   events.onmessage = async (message) => {
     const data = JSON.parse(message.data)
+    if (data.id === review && data.type === 'feedback') return player.feedback?.refresh()
+    if (data.id === review && data.type === 'chat') return player.feedback?.onChat(data)
+    if (data.id === review && data.type === 'presence') return player.feedback?.setPresence(data.listening)
+    if (!player.deck.planFor && data.id === `${id}-plan`) {
+      const plan = await fetch(`/api/decks/${data.id}`).then((r) => (r.ok ? (r.json() as Promise<CompiledDeck>) : null), () => null)
+      return player.setPlan(plan ? { id: plan.id, slideCount: plan.slides.length, updatedAt: plan.updatedAt } : undefined)
+    }
     if (data.id !== id) return
-    if (data.type === 'feedback') return player.feedback?.refresh()
-    if (data.type === 'chat') return player.feedback?.onChat(data)
-    if (data.type === 'presence') return player.feedback?.setPresence(data.listening)
     try {
       const deck = await load()
       if (deck.revision === revision) return

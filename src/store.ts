@@ -35,6 +35,9 @@ export async function loadDeck(id: string): Promise<StoredDeck> {
 }
 
 export async function saveDeck(deck: StoredDeck): Promise<void> {
+  // The viewer's built-in agent may only edit the deck it is working on.
+  const scope = process.env.FERRY_DECK_SCOPE
+  if (scope && deck.id !== scope) throw new Error(`this session can only edit deck "${scope}"`)
   await mkdir(decksDir(), { recursive: true })
   deck.updatedAt = new Date().toISOString()
   deck.revision++
@@ -45,14 +48,30 @@ export async function saveDeck(deck: StoredDeck): Promise<void> {
   await rename(temp, path)
 }
 
-/** Deletes a deck along with its change plan, agent-presence beacon and viewer chat. */
+/** Deletes a deck along with its plan deck, sent plans, agent-presence beacon and viewer chat. */
 export async function deleteDeck(id: string): Promise<void> {
   await rm(deckPath(id)).catch(() => {
     throw new Error(`deck "${id}" not found — call list_decks to see existing decks`)
   })
+  await rm(deckPath(planIdFor(id)), { force: true })
   const home = ferryHome()
   const extras = [join(home, 'feedback', `${id}.json`), join(home, 'feedback', `${id}.listening`), join(home, 'chat', `${id}.json`)]
   await Promise.all(extras.map((path) => rm(path, { force: true })))
+}
+
+// A deck's plan is a second deck of slides proposing code changes, built in the viewer's Plan mode.
+export const planIdFor = (deckId: string) => `${deckId}-plan`
+
+export function loadPlan(deck: StoredDeck): Promise<StoredDeck | undefined> {
+  return loadDeck(planIdFor(deck.id)).catch(() => undefined)
+}
+
+export async function ensurePlan(deck: StoredDeck): Promise<StoredDeck> {
+  const existing = await loadPlan(deck)
+  if (existing) return existing
+  const plan: StoredDeck = { ...newDeck({ title: `Plan: ${deck.title}`, repo: deck.repo, ref: deck.ref, theme: deck.theme }), id: planIdFor(deck.id), planFor: deck.id }
+  await saveDeck(plan)
+  return plan
 }
 
 /** The local repository and range a deck explains: its first git source, else its repo field when that is a path. */

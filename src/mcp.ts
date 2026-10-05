@@ -7,7 +7,7 @@ import { exportDeck } from './export.ts'
 import { GUIDE, INSTRUCTIONS } from './guide.ts'
 import { ensureServer, openInBrowser } from './server.ts'
 import { DeckMetaInput, SlideInput, ThemeSchema } from './schema.ts'
-import { assignId, compileInto, deleteDeck, ferryHome, listDecks, loadDeck, newDeck, saveDeck, type SourceSlide, type StoredDeck } from './store.ts'
+import { assignId, compileInto, deleteDeck, ferryHome, listDecks, loadDeck, loadPlan, newDeck, saveDeck, type SourceSlide, type StoredDeck } from './store.ts'
 import { stopChat } from './chat.ts'
 import { changePlan, loadFeedback, setListening, updateFeedback, type FeedbackItem } from './feedback.ts'
 
@@ -273,7 +273,7 @@ export function createMcpServer(): McpServer {
       const decks = await listDecks()
       if (!decks.length) return 'No decks yet. Use create_deck or draft_deck_from_git.'
       const base = await ensureServer()
-      return decks.map((d) => `${d.id} · "${d.title}" · ${d.slideCount} slides · updated ${d.updatedAt} · ${base}/d/${d.id}`).join('\n')
+      return decks.map((d) => `${d.id} · "${d.title}" · ${d.slideCount} slides${d.planFor ? ` · plan for ${d.planFor}` : ''} · updated ${d.updatedAt} · ${base}/d/${d.id}`).join('\n')
     }),
   )
 
@@ -392,7 +392,7 @@ export function createMcpServer(): McpServer {
       for (const item of pending) Object.assign(item, { status: 'working', updatedAt: now })
       return pending.map((i) => ({ ...i }))
     })
-    return { plan: changePlan(deck, items), count: items.length }
+    return { plan: changePlan(deck, items, await loadPlan(deck)), count: items.length }
   }
 
   server.registerTool(
@@ -400,7 +400,7 @@ export function createMcpServer(): McpServer {
     {
       title: 'Wait for feedback',
       description:
-        "Wait until the user sends a change plan from the viewer's feedback panel (C key), then return it: code changes they want in the repository the deck explains, each with the slide, step and pinned element (often a code line) it was written on, plus the slide's authoring JSON. Returns at once if requests are already pending. The viewer shows the user that you are listening. Make the changes in the code (not the slides), resolve_feedback, then call this again to keep reviewing together.",
+        "Wait until the user sends code changes from the viewer (C key), then return them. Usually that is a plan: a second deck of slides the user built in the viewer's Plan mode, proposing code changes with hand-written diffs; the result includes its outline and authoring JSON. It can also hold individual requests pinned to slides. Returns at once if something is already pending. The viewer shows the user that you are listening. Implement the changes in the repository the deck explains (not in the slides), resolve_feedback, then call this again to keep reviewing together.",
       inputSchema: {
         deck_id: z.string(),
         timeout_seconds: z.number().int().min(5).max(3600).optional().describe('How long to wait (default 300). On timeout, tell the user how to send feedback, or wait again.'),
@@ -541,7 +541,7 @@ export function createMcpServer(): McpServer {
 2. Decide the story: the problem, the 2–5 key changes, and what reviewers must check.
 3. create_deck, then add_slides: title (with git stats) → points overview → for each key change a sequence or flow slide showing behavior before/after, then a diff slide with one idea per step, notes, focus, and callouts → metrics if any → a checklist of review focus, risks, and tests.
 4. Fix all warnings, then open_deck and tell the user the URL and the keys (→ ← ↑ ↓, O overview, C feedback).
-5. Review together: call wait_for_feedback. Each change plan the user sends from the viewer lists code changes: make them in the repository, resolve_feedback with short replies, and wait again until they are done.`,
+5. Review together: call wait_for_feedback. The user plans code changes in the viewer (chat in Plan mode drafts them as a plan deck) and sends the plan: implement it in the repository, resolve_feedback with a short reply, and wait again until they are done.`,
           },
         },
       ],

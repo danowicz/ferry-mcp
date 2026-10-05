@@ -64,36 +64,35 @@ The `explain_changes` prompt walks the agent through the whole flow. The viewer 
 | `delete_deck` | Deletes a deck with its change plan and chat |
 | `draft_deck_from_git` | Skeleton deck: title with stats, file map, one stepped diff per significant file |
 | `open_deck` | Opens the live viewer |
-| `wait_for_feedback` | Waits until you send a change plan from the viewer, then returns it with slide JSON |
-| `get_feedback` | Returns pending requests without waiting |
-| `resolve_feedback` | Closes requests with a reply shown in the viewer chat |
-| `reply_feedback` | Asks you a question in the viewer chat |
+| `wait_for_feedback` | Waits until you send a plan from the viewer, then returns it to implement (outline and slide JSON) |
+| `get_feedback` | Returns what's pending without waiting |
+| `resolve_feedback` | Closes a sent plan with a reply shown in the viewer |
+| `reply_feedback` | Asks you a question in the viewer |
 | `export_deck` | One self-contained HTML file (fonts and code inlined, works offline) |
 
-## Chat in the viewer
+## Review, plan, then implement
 
-Press **C** in the viewer. The **Chat** tab is a conversation with a Claude Code agent dedicated to the deck:
+Ferry splits a review into three steps, all in the viewer:
+
+1. **Review** the change through the deck the agent built: behavior, architecture, then the code, step by step.
+2. **Plan** what should change next. Press **C** and switch the chat to **Plan** (or press Shift+Tab). Describe a change ("make the retry interval configurable", "add a test for the live-server guard") and **Pin** the code line it's about if you like. Claude reads the code and drafts the change as a **plan deck**: a second set of slides with the proposed code as hand-written diffs, the approach, and the tests to add. **Nothing in the repository changes while you plan.** Open the plan with the **Plan** button in the bar, keep chatting to revise it, and go back and forth until the slides say what you want.
+3. **Implement**: in the panel's **Plan** tab, press **Send plan to agent**.
+   - If *your* agent (the one that built the deck) is waiting in `wait_for_feedback`, the panel says **Agent is listening** and the agent receives the plan: its outline and every slide's authoring JSON.
+   - Otherwise Claude Code running in the viewer implements it. It edits the code in the deck's repository on the checked-out branch, never commits, and you follow along in the Chat tab. If it doesn't finish, the plan goes back so you can send it again.
+   - The agent replies when it's done (**Done** or **Declined**). Reply under it to reopen. Review the result with `git diff` as usual.
+
+**Copy as prompt** gives you a prompt for any other agent to implement the plan.
+
+### The chat
+
+The chat is a conversation with a Claude Code agent dedicated to the deck. It runs headless (`claude -p`) in the deck's repository, using your existing Claude Code login.
 
 - Every message carries what you're looking at: the slide, the step, and anything you **Pin** (a code line, node, row…).
-- The agent runs headless (`claude -p`) in the deck's repository, using your existing Claude Code login. It can read the code (Read, Grep, Glob, read-only git) and edit the deck through Ferry's tools. It never modifies repository files.
-- Replies stream into the panel along with what the agent is doing ("Reading bind.ts", "Updating slide…"). Slide edits appear live.
-- The conversation continues across messages (one Claude Code session per deck). **New chat** starts over, and **Stop** interrupts.
-- **Add to plan** turns your text into a code change in the change plan, instead of asking the chat agent.
+- **Ask** mode answers questions and can edit the deck you're reviewing. **Plan** mode edits only the plan deck. Neither can touch repository files: only a sent plan does, and each mode can only write to its own deck.
+- Replies stream into the panel along with what the agent is doing ("Reading bind.ts", "Adding slides"), and slides update live.
+- The conversation continues across messages. **New chat** starts over, and **Stop** interrupts.
 
-Set `FERRY_CHAT_MODEL` to pick a model (e.g. `sonnet` for faster replies), or `FERRY_CLAUDE_BIN` if `claude` isn't on your PATH. Chat logs are stored in `~/.ferry/chat/`.
-
-## Review together (change plans)
-
-The **Change plan** tab collects the **code changes** you want while reviewing: "rename this", "handle the timeout here", "add a test for this case". An agent makes them in the repository the deck explains. That's *your* agent, the one that built the deck in your Claude Code session, or Ferry's built-in one when yours isn't listening:
-
-1. **Write a request** on the current slide and step, or switch the chip to *Whole deck*. **Pin** (or **P**) lets you click any element to anchor it: a code line, callout, node, edge, sequence row, point, metric or file. The agent uses that to find the code.
-2. Each request becomes a **draft** in the change plan. **Send to agent** delivers the whole plan (⌘↵ sends right away).
-3. If the agent called `wait_for_feedback`, the panel shows **Agent is listening**, and the agent gets the plan immediately: every request with its slide, step, pinned element and the slide's authoring JSON. If no agent is listening, **Send to agent** hands the plan to Claude Code running in the viewer. It edits the code in the deck's repository (on the checked-out branch, never committing), and you can follow along in the Chat tab. Requests it doesn't resolve go back to the plan so you can send them again. To use your own agent instead, tell it "apply my Ferry feedback", or use **Copy as prompt**.
-4. The agent makes the code changes, then replies per request with what it changed. Replies appear as **Done** or **Declined**. Reply under any request to reopen it. The agent can also ask you questions in the thread. Review the result with `git diff` as usual.
-
-Slide edits don't go through the plan: ask for them in the **Chat** tab.
-
-Slides with open requests get a dot on the progress bar. Feedback is stored in `~/.ferry/feedback/`. The viewer only accepts JSON requests from localhost pages, so other websites can't inject instructions for your agent.
+Set `FERRY_CHAT_MODEL` to pick a model (e.g. `sonnet` for faster replies), or `FERRY_CLAUDE_BIN` if `claude` isn't on your PATH. Chat logs are stored in `~/.ferry/chat/` and sent plans in `~/.ferry/feedback/`. The viewer only accepts JSON requests from localhost pages, so other websites can't send instructions to your agent.
 
 ## Slide types
 
@@ -101,7 +100,7 @@ Slides with open requests get a dot on the progress bar. Feedback is stored in `
 
 ## Viewer keys
 
-→ / Space: next step · ← back · ↑ ↓ slides · **C** chat & change plan · **P** pin · **O** overview · **N** speaker notes · **V** voice narration (auto-advances) · **T** theme (midnight, tokyo, evergreen, paper) · **S** slow motion · **R** replay · **F** fullscreen · **?** help
+→ / Space: next step · ← back · ↑ ↓ slides · **C** chat & plan · **P** pin · **O** overview · **N** speaker notes · **V** voice narration (auto-advances) · **T** theme (midnight, tokyo, evergreen, paper) · **S** slow motion · **R** replay · **F** fullscreen · **?** help
 
 ## CLI
 

@@ -7,9 +7,9 @@ import { watch, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { buildViewer, FONT_FILES, ROOT, viewerAsset } from './build.ts'
-import { decksDir, deleteDeck, listDecks, loadDeck } from './store.ts'
-import { feedbackDir, isListening, loadFeedback, newItem, updateFeedback } from './feedback.ts'
-import { activeMessage, applyPlan, clearChat, loadChat, sendChat, stopChat } from './chat.ts'
+import { decksDir, deleteDeck, listDecks, loadDeck, loadPlan, planIdFor } from './store.ts'
+import { feedbackDir, isListening, loadFeedback, newItem, pending, updateFeedback } from './feedback.ts'
+import { activeMessage, clearChat, implement, loadChat, sendChat, stopChat, type ChatMode } from './chat.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_PORT = Number(process.env.FERRY_PORT ?? 4747)
@@ -87,17 +87,22 @@ async function feedbackRoute(req: IncomingMessage, res: ServerResponse, deckId: 
     return json(res, item, 201)
   }
   if (method === 'POST' && rest[0] === 'send') {
-    await loadDeck(deckId) // unknown decks get no feedback file
-    const sent = await updateFeedback(deckId, (data) => {
+    // Sends the plan deck (and any drafted requests) to be implemented.
+    const plan = await loadPlan(await loadDeck(deckId))
+    const { sent, error } = await updateFeedback(deckId, (data) => {
       const now = new Date().toISOString()
       const drafts = data.items.filter((i) => i.status === 'draft')
       for (const item of drafts) Object.assign(item, { status: 'open', updatedAt: now })
-      return drafts.length
+      if (!plan?.slides.length) return { sent: drafts.length, error: drafts.length ? undefined : 'Nothing to send yet: build a plan in the chat’s Plan mode first.' }
+      if (data.items.some((i) => i.plan && pending(i))) return { sent: drafts.length, error: drafts.length ? undefined : 'The plan is already with the agent.' }
+      data.items.push(newItem({ text: `Implement the plan (${plan.slides.length} slide${plan.slides.length === 1 ? '' : 's'})`, status: 'open', plan: { id: plan.id, revision: plan.revision } }))
+      return { sent: drafts.length + 1, error: undefined }
     })
+    if (!sent) return json(res, { sent, applying: 0, error })
     if (await isListening(deckId)) return json(res, { sent, applying: 0 })
-    // Nobody is waiting with wait_for_feedback: the viewer's own agent applies the plan.
+    // Nobody is waiting with wait_for_feedback: the viewer's own agent implements it.
     try {
-      return json(res, { sent, applying: await applyPlan(deckId, (event) => broadcast({ type: 'chat', id: deckId, ...event })) })
+      return json(res, { sent, applying: await implement(deckId, (event) => broadcast({ type: 'chat', id: deckId, ...event })) })
     } catch (error) {
       return json(res, { sent, applying: 0, error: (error as Error).message })
     }
@@ -144,7 +149,9 @@ async function chatRoute(req: IncomingMessage, res: ServerResponse, deckId: stri
       deckId,
       {
         text,
+        mode: (input.mode === 'plan' ? 'plan' : 'ask') satisfies ChatMode,
         context: {
+          deckId: str(input.viewing, 120),
           slideId: str(input.slideId, 120),
           step: typeof input.step === 'number' ? input.step : undefined,
           target: target && typeof target.label === 'string' ? { kind: str(target.kind, 40) ?? 'element', label: target.label.slice(0, 400) } : undefined,
@@ -198,7 +205,8 @@ async function handle(req: IncomingMessage, url: URL, res: ServerResponse) {
     try {
       const { source, ...deck } = await loadDeck(id)
       void source
-      return json(res, deck)
+      const plan = deck.planFor ? undefined : await loadDeck(planIdFor(id)).catch(() => undefined)
+      return json(res, plan ? { ...deck, plan: { id: plan.id, slideCount: plan.slides.length, updatedAt: plan.updatedAt } } : deck)
     } catch (error) {
       return json(res, { error: (error as Error).message }, 404)
     }
