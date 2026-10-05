@@ -524,18 +524,41 @@ function ago(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** First click asks for confirmation; the second deletes. The deck watcher then re-renders the grid. */
+async function deleteCard(card: HTMLElement, button: HTMLElement, id: string) {
+  if (!button.classList.contains('confirm')) return button.classList.add('confirm')
+  card.classList.add('removing')
+  const response = await fetch(`/api/decks/${id}`, { method: 'DELETE', headers: { 'content-type': 'application/json' } }).catch(() => null)
+  if (response?.ok) {
+    setTimeout(() => card.remove(), 300)
+    return
+  }
+  card.classList.remove('removing')
+  button.querySelector('span')!.textContent = 'Failed — retry?'
+}
+
+function missing(title: string, message: string) {
+  document.title = 'Ferry'
+  app.replaceChildren(h('div', { class: 'home' }, h('header', { class: 'home-head' }, h('div', { class: 'home-brand' }, h('span', { html: LOGO }), h('b', {}, 'Ferry')), h('h1', {}, title), h('p', {}, message), h('p', {}, h('a', { href: '/' }, 'All decks →')))))
+}
+
 async function home() {
   setTheme((localStorage.getItem('ferry-theme:home') as ThemeName) ?? 'midnight')
   document.title = 'Ferry'
   const [decks, health] = await Promise.all([fetch('/api/decks').then((r) => r.json() as Promise<DeckSummary[]>), fetch('/api/health').then((r) => r.json())])
   const grid = h('div', { class: 'home-grid' })
   decks.forEach((deck, i) => {
+    const remove = h('button', { class: 'hc-delete', title: 'Delete deck', 'aria-label': `Delete “${deck.title}”`, html: `${icon('trash', 15)}<span>Delete?</span>` })
     const card = h(
-      'a',
-      { class: 'home-card', href: `/d/${deck.id}`, 'data-theme': deck.theme, style: `--i:${i}` },
-      h('div', { class: 'hc-art' }, h('div', { class: 'aurora' }, h('i'), h('i')), h('span', { class: 'hc-count' }, `${deck.slideCount} slides`)),
-      h('div', { class: 'hc-body' }, h('h2', {}, deck.title), deck.subtitle ? h('p', {}, deck.subtitle) : null, h('div', { class: 'hc-meta' }, h('span', {}, [deck.repo, deck.ref].filter(Boolean).join(' · ') || deck.id), h('span', {}, ago(deck.updatedAt)))),
+      'div',
+      { class: 'home-card', 'data-theme': deck.theme, style: `--i:${i}` },
+      h('div', { class: 'hc-art' }, h('div', { class: 'aurora' }, h('i'), h('i')), h('span', { class: 'hc-count' }, `${deck.slideCount} slides`), remove),
+      h('div', { class: 'hc-body' }, h('h2', {}, h('a', { class: 'hc-link', href: `/d/${deck.id}` }, deck.title)), deck.subtitle ? h('p', {}, deck.subtitle) : null, h('div', { class: 'hc-meta' }, h('span', {}, [deck.repo, deck.ref].filter(Boolean).join(' · ') || deck.id), h('span', {}, ago(deck.updatedAt)))),
     )
+    remove.addEventListener('click', () => deleteCard(card, remove, deck.id))
+    const reset = () => remove.classList.remove('confirm')
+    card.addEventListener('mouseleave', reset)
+    remove.addEventListener('blur', reset)
     grid.append(card)
   })
   const cmd = health.mcpCommand ?? 'node /path/to/ferry/bin/ferry.js'
@@ -587,14 +610,14 @@ async function boot() {
   const id = match[1]
   const load = async () => {
     const response = await fetch(`/api/decks/${id}`)
-    if (!response.ok) throw new Error((await response.json()).error)
+    if (!response.ok) throw Object.assign(new Error((await response.json()).error), { status: response.status })
     return (await response.json()) as CompiledDeck
   }
   let player: Player
   try {
     player = new Player(await load())
   } catch (error) {
-    app.replaceChildren(h('div', { class: 'home' }, h('header', { class: 'home-head' }, h('div', { class: 'home-brand' }, h('span', { html: LOGO }), h('b', {}, 'Ferry')), h('h1', {}, 'Deck not found'), h('p', {}, String((error as Error).message)), h('p', {}, h('a', { href: '/' }, 'All decks →')))))
+    missing('Deck not found', String((error as Error).message))
     return
   }
   const events = new EventSource('/api/events')
@@ -612,8 +635,11 @@ async function boot() {
       if (deck.revision === revision) return
       revision = deck.revision
       player.update(deck)
-    } catch {
-      /* deck deleted or mid-write */
+    } catch (error) {
+      // Saves are atomic renames, so a missing deck was deleted.
+      if ((error as { status?: number }).status !== 404) return
+      events.close()
+      missing('Deck deleted', `“${player.deck.title}” was deleted.`)
     }
   }
 }

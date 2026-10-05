@@ -51,6 +51,7 @@ import arrow from 'lucide-static/icons/arrow-right.svg'
 import left from 'lucide-static/icons/chevron-left.svg'
 import right from 'lucide-static/icons/chevron-right.svg'
 import newchat from 'lucide-static/icons/message-square-plus.svg'
+import trash from 'lucide-static/icons/trash-2.svg'
 
 const ICONS: Record<string, string> = {
   server, database, db: database, user, users: user, person: user, browser, web: browser, cloud, queue, cache, redis: cache,
@@ -59,7 +60,7 @@ const ICONS: Record<string, string> = {
   security: shield, cpu, worker: cpu, layers, git, branch: git, clock, timer: clock, cron: clock, search, bell, notification: bell,
   chart, metrics: chart, plug, api: plug, workflow, pipeline: workflow, monitor, desktop: monitor, message, chat: message,
   check, x, pr, commit, folder, sparkles, ai: sparkles, play, pause, volume, grid, sun, moon, notes, maximize, keyboard,
-  warning, ok, fail, info, arrow, left, right, newchat,
+  warning, ok, fail, info, arrow, left, right, newchat, trash, delete: trash,
 }
 
 export function icon(name: string | undefined, size = 20): string {

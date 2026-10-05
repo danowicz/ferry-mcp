@@ -44,8 +44,14 @@ export async function saveDeck(deck: StoredDeck): Promise<void> {
   await rename(temp, path)
 }
 
+/** Deletes a deck along with its change plan, agent-presence beacon and viewer chat. */
 export async function deleteDeck(id: string): Promise<void> {
-  await rm(deckPath(id))
+  await rm(deckPath(id)).catch(() => {
+    throw new Error(`deck "${id}" not found — call list_decks to see existing decks`)
+  })
+  const home = ferryHome()
+  const extras = [join(home, 'feedback', `${id}.json`), join(home, 'feedback', `${id}.listening`), join(home, 'chat', `${id}.json`)]
+  await Promise.all(extras.map((path) => rm(path, { force: true })))
 }
 
 export type DeckSummary = Omit<CompiledDeck, 'slides'> & { slideCount: number; firstSlide?: string }

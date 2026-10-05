@@ -61,6 +61,7 @@ The `explain_changes` prompt walks the agent through the whole flow. The viewer 
 | `create_deck` / `update_deck` | Deck metadata and theme |
 | `add_slides` / `update_slide` / `remove_slides` / `reorder_slides` | Edit the deck; warnings flag unmatched callouts, unknown ids, folded targets |
 | `get_deck` / `list_decks` | Read back authoring JSON and outlines |
+| `delete_deck` | Deletes a deck with its change plan and chat |
 | `draft_deck_from_git` | Skeleton deck: title with stats, file map, one stepped diff per significant file |
 | `open_deck` | Opens the live viewer |
 | `wait_for_feedback` | Waits until you send a change plan from the viewer, then returns it with slide JSON |
@@ -105,6 +106,7 @@ Slides with open requests get a dot on the progress bar. Feedback is stored in `
 ```sh
 node bin/ferry.js serve [--open]        # standalone viewer
 node bin/ferry.js list                  # saved decks
+node bin/ferry.js delete <deck-id>…     # delete decks (or use the trash button on the home page)
 node bin/ferry.js export <deck-id> [out.html]
 npm run demo                            # builds the showcase deck through MCP
 npm run record                          # re-records docs/demo.mp4 (needs ffmpeg and Playwright's Chromium)

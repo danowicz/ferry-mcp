@@ -1,4 +1,5 @@
 // End-to-end check of every MCP tool against an isolated FERRY_HOME.
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -108,6 +109,21 @@ assert.deepEqual(await fetch(chatApi).then((r) => r.json()), { messages: [], run
 assert.equal((await fetch(chatApi, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 400)
 assert.equal((await fetch(chatApi, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"text":"hi"}' })).status, 400)
 ok('chat API guards (empty message, cross-origin)')
+
+const deckApi = new URL(`/api/decks/${id}`, url)
+assert.equal((await fetch(deckApi, { method: 'DELETE' })).status, 400)
+assert.equal((await fetch(deckApi, { method: 'DELETE', headers: { 'content-type': 'application/json', origin: 'https://evil.example' } })).status, 400)
+const spare = async (title: string) => (await call('create_deck', { title })).match(/id: ([a-z0-9-]+)/)![1]
+const viaViewer = await spare('Deleted from the viewer')
+assert.equal((await fetch(new URL(`/api/decks/${viaViewer}`, url), { method: 'DELETE', headers: { 'content-type': 'application/json' } })).status, 200)
+const viaCli = await spare('Deleted from the CLI')
+const cli = execFileSync(process.execPath, [join(import.meta.dirname, '..', 'bin', 'ferry.js'), 'delete', viaCli], { env: { ...process.env, FERRY_HOME: home }, encoding: 'utf8' })
+assert.match(cli, /Deleted .*Deleted from the CLI/)
+assert.match(await call('delete_deck', { deck_id: id }), /Deleted deck/)
+assert.ok(!existsSync(join(home, 'decks', `${id}.json`)) && !existsSync(join(home, 'feedback', `${id}.json`)))
+assert.equal((await fetch(deckApi)).status, 404)
+assert.doesNotMatch(await call('list_decks'), new RegExp(`${id}|${viaViewer}|${viaCli}`))
+ok('delete_deck, ferry delete and the viewer DELETE route (same-origin JSON only)')
 
 const prompts = await client.listPrompts()
 assert.ok(prompts.prompts.some((p) => p.name === 'explain_changes'))

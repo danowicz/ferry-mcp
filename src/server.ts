@@ -7,7 +7,7 @@ import { watch, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { buildViewer, FONT_FILES, ROOT, viewerAsset } from './build.ts'
-import { decksDir, listDecks, loadDeck } from './store.ts'
+import { decksDir, deleteDeck, listDecks, loadDeck } from './store.ts'
 import { feedbackDir, isListening, loadFeedback, newItem, updateFeedback } from './feedback.ts'
 import { activeMessage, clearChat, loadChat, sendChat, stopChat } from './chat.ts'
 
@@ -177,8 +177,19 @@ async function handle(req: IncomingMessage, url: URL, res: ServerResponse) {
   if (path === '/api/health') return json(res, { ferry: true, version: VERSION, mcpCommand: `node ${join(ROOT, 'bin', 'ferry.js')}` })
   if (path === '/api/decks') return json(res, await listDecks())
   if (path.startsWith('/api/decks/')) {
+    const id = decodeURIComponent(path.slice('/api/decks/'.length))
+    if (req.method === 'DELETE') {
+      try {
+        await body(req) // JSON from localhost pages only, like the feedback API
+        stopChat(id)
+        await deleteDeck(id)
+        return json(res, { deleted: id })
+      } catch (error) {
+        return json(res, { error: (error as Error).message }, 400)
+      }
+    }
     try {
-      const { source, ...deck } = await loadDeck(decodeURIComponent(path.slice('/api/decks/'.length)))
+      const { source, ...deck } = await loadDeck(id)
       void source
       return json(res, deck)
     } catch (error) {

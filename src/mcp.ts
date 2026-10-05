@@ -7,7 +7,8 @@ import { exportDeck } from './export.ts'
 import { GUIDE, INSTRUCTIONS } from './guide.ts'
 import { ensureServer, openInBrowser } from './server.ts'
 import { DeckMetaInput, SlideInput, ThemeSchema } from './schema.ts'
-import { assignId, compileInto, ferryHome, listDecks, loadDeck, newDeck, saveDeck, type SourceSlide, type StoredDeck } from './store.ts'
+import { assignId, compileInto, deleteDeck, ferryHome, listDecks, loadDeck, newDeck, saveDeck, type SourceSlide, type StoredDeck } from './store.ts'
+import { stopChat } from './chat.ts'
 import { changePlan, loadFeedback, setListening, updateFeedback, type FeedbackItem } from './feedback.ts'
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean }
@@ -273,6 +274,22 @@ export function createMcpServer(): McpServer {
       if (!decks.length) return 'No decks yet. Use create_deck or draft_deck_from_git.'
       const base = await ensureServer()
       return decks.map((d) => `${d.id} · "${d.title}" · ${d.slideCount} slides · updated ${d.updatedAt} · ${base}/d/${d.id}`).join('\n')
+    }),
+  )
+
+  server.registerTool(
+    'delete_deck',
+    {
+      title: 'Delete deck',
+      description: 'Permanently delete a deck, its change plan and its viewer chat. Only do this when the user asks: it cannot be undone.',
+      inputSchema: { deck_id: z.string() },
+      annotations: { destructiveHint: true },
+    },
+    tool(async ({ deck_id }) => {
+      const deck = await loadDeck(deck_id)
+      stopChat(deck_id)
+      await deleteDeck(deck_id)
+      return `Deleted deck "${deck.title}" (${deck_id}). Open viewers show that it is gone.`
     }),
   )
 
