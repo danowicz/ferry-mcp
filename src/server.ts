@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { buildViewer, FONT_FILES, ROOT, viewerAsset } from './build.ts'
 import { decksDir, deleteDeck, listDecks, loadDeck } from './store.ts'
 import { feedbackDir, isListening, loadFeedback, newItem, updateFeedback } from './feedback.ts'
-import { activeMessage, clearChat, loadChat, sendChat, stopChat } from './chat.ts'
+import { activeMessage, applyPlan, clearChat, loadChat, sendChat, stopChat } from './chat.ts'
 
 const VERSION = '0.1.0'
 const DEFAULT_PORT = Number(process.env.FERRY_PORT ?? 4747)
@@ -87,13 +87,20 @@ async function feedbackRoute(req: IncomingMessage, res: ServerResponse, deckId: 
     return json(res, item, 201)
   }
   if (method === 'POST' && rest[0] === 'send') {
+    await loadDeck(deckId) // unknown decks get no feedback file
     const sent = await updateFeedback(deckId, (data) => {
       const now = new Date().toISOString()
       const drafts = data.items.filter((i) => i.status === 'draft')
       for (const item of drafts) Object.assign(item, { status: 'open', updatedAt: now })
       return drafts.length
     })
-    return json(res, { sent })
+    if (await isListening(deckId)) return json(res, { sent, applying: 0 })
+    // Nobody is waiting with wait_for_feedback: the viewer's own agent applies the plan.
+    try {
+      return json(res, { sent, applying: await applyPlan(deckId, (event) => broadcast({ type: 'chat', id: deckId, ...event })) })
+    } catch (error) {
+      return json(res, { sent, applying: 0, error: (error as Error).message })
+    }
   }
   const id = rest[0]
   if (method === 'DELETE' && id) {

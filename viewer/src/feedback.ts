@@ -192,6 +192,7 @@ export class FeedbackPanel {
 
   setPresence(listening: boolean) {
     this.listening = listening
+    this.render()
     this.renderPresence()
   }
 
@@ -262,6 +263,7 @@ export class FeedbackPanel {
       if (index >= 0) this.chat[index] = event.message
       else this.chat.push(event.message)
       this.running = false
+      this.render() // the plan can be sent again
       if (!this.open || this.tab !== 'chat') this.host.flash('The agent replied in Chat')
     }
     if (this.renderQueued) return
@@ -375,7 +377,10 @@ export class FeedbackPanel {
     if (this.input.value.trim()) return this.add(true)
     const result = await this.post('/send', {})
     await this.refresh()
-    if (result.sent) this.host.flash(this.listening ? `Sent ${result.sent} request${result.sent === 1 ? '' : 's'} to the agent` : 'Plan sent · no agent is listening — use “Copy as prompt”')
+    const requests = (n: number) => `${n} request${n === 1 ? '' : 's'}`
+    if (result.error) this.host.flash(result.error)
+    else if (result.applying) this.host.flash(`Claude is applying ${requests(result.applying)} · follow along in Chat`)
+    else if (result.sent) this.host.flash(`Sent ${requests(result.sent)} to the agent`)
   }
 
   private async remove(id: string) {
@@ -456,7 +461,7 @@ export class FeedbackPanel {
       ? '<i></i><span><b>Agent is listening</b> — send your plan and it starts working.</span>'
       : working
         ? `<i></i><span><b>Agent is working</b> on ${working} request${working === 1 ? '' : 's'}. Slides update here as it goes.</span>`
-        : '<i></i><span>No agent listening. Send the plan, then tell your agent “apply my Ferry feedback” — or use Copy as prompt.</span>'
+        : '<i></i><span><b>Send</b> hands the plan to Claude here: it edits the slides and replies to each request. To use your own agent instead, Copy as prompt.</span>'
   }
 
   private render() {
@@ -465,11 +470,13 @@ export class FeedbackPanel {
     const items = this.items.filter((i) => !this.onlyHere || i.slideId === current)
     this.filterButton.textContent = this.onlyHere ? 'This slide' : 'All slides'
     const drafts = this.items.filter((i) => i.status === 'draft').length
+    // With no agent listening, requests already sent can be handed to the built-in agent again.
+    const queued = this.listening || this.running ? 0 : this.items.filter((i) => i.status === 'open').length
     const pending = this.items.filter((i) => i.text && ['draft', 'open', 'working'].includes(i.status)).length
     this.planTab.innerHTML = `${icon('notes', 14)}<span>Change plan</span>${pending ? `<em>${pending}</em>` : ''}`
     this.planTab.title = 'Requests queued for the agent that built the deck'
-    this.sendButton.innerHTML = `${icon('arrow', 15)}<span>Send to agent${drafts ? ` · ${drafts}` : ''}</span>`
-    this.sendButton.toggleAttribute('disabled', drafts === 0)
+    this.sendButton.innerHTML = `${icon('arrow', 15)}<span>Send to agent${drafts + queued ? ` · ${drafts + queued}` : ''}</span>`
+    this.sendButton.toggleAttribute('disabled', drafts + queued === 0)
 
     const atBottom = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 40
     this.list.replaceChildren()

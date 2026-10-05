@@ -84,11 +84,11 @@ Set `FERRY_CHAT_MODEL` to pick a model (e.g. `sonnet` for faster replies), or `F
 
 ## Review together (change plans)
 
-The **Change plan** tab queues requests for *your* agent, the one that built the deck in your Claude Code session:
+The **Change plan** tab queues requests for an agent to apply: *your* agent, the one that built the deck in your Claude Code session, or Ferry's built-in one when yours isn't listening:
 
 1. **Comment** on the current slide and step, or switch the chip to *Whole deck*. **Pin** (or **P**) lets you click any element to anchor the comment: a code line, callout, node, edge, sequence row, point, metric or file.
 2. Each comment becomes a **draft** in the change plan. **Send to agent** delivers the whole plan (⌘↵ sends right away).
-3. If the agent called `wait_for_feedback`, the panel shows **Agent is listening**, and the agent gets the plan immediately: every request with its slide, step, pinned element and the slide's authoring JSON. If no agent is listening, tell your agent "apply my Ferry feedback", or use **Copy as prompt**.
+3. If the agent called `wait_for_feedback`, the panel shows **Agent is listening**, and the agent gets the plan immediately: every request with its slide, step, pinned element and the slide's authoring JSON. If no agent is listening, **Send to agent** hands the plan to the built-in agent (the one behind the Chat tab): it edits the slides and replies to each request, and you can follow along in Chat. Requests it doesn't resolve go back to the plan so you can send them again. To use your own agent instead, tell it "apply my Ferry feedback", or use **Copy as prompt**.
 4. The agent edits the slides (they update live), then replies per request. Replies appear in the chat as **Done** or **Declined**. Reply under any request to reopen it. The agent can also ask you questions in the thread.
 
 Slides with open requests get a dot on the progress bar. Feedback is stored in `~/.ferry/feedback/`. The viewer only accepts JSON requests from localhost pages, so other websites can't inject instructions for your agent.

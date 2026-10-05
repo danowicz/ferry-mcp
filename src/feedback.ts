@@ -143,7 +143,7 @@ export function describeItem(deck: StoredDeck, item: FeedbackItem, n: number): s
   return lines.join('\n')
 }
 
-export function changePlan(deck: StoredDeck, items: FeedbackItem[]): string {
+export function changePlan(deck: StoredDeck, items: FeedbackItem[], then = 'Finally call wait_for_feedback again to keep reviewing with the user.'): string {
   const list = items.filter(pending)
   if (!list.length) return `No pending feedback on deck "${deck.title}" (${deck.id}).`
   const slideIds = [...new Set(list.map((i) => i.slideId).filter(Boolean))] as string[]
@@ -155,7 +155,7 @@ export function changePlan(deck: StoredDeck, items: FeedbackItem[]): string {
     `Change plan for deck "${deck.title}" (${deck.id}) — ${list.length} request${list.length === 1 ? '' : 's'} from the viewer:`,
     list.map((item, i) => describeItem(deck, item, i + 1)).join('\n\n'),
     sources.length ? `Current authoring JSON of the slides involved:\n${sources.join('\n\n')}` : '',
-    'Next: apply each request (update_slide takes the complete slide; add_slides/remove_slides/reorder_slides as needed). Then call resolve_feedback with a one-line reply per item — "done" with what changed, or "declined" with why. Ask with reply_feedback if a request is unclear. Finally call wait_for_feedback again to keep reviewing with the user.',
+    'Next: apply each request (update_slide takes the complete slide; add_slides/remove_slides/reorder_slides as needed). Then call resolve_feedback with a one-line reply per item — "done" with what changed, or "declined" with why. Ask with reply_feedback if a request is unclear. ' + then,
   ]
     .filter(Boolean)
     .join('\n\n')

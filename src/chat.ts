@@ -9,6 +9,7 @@ import { isAbsolute, join } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { ROOT } from './build.ts'
 import { ferryHome, loadDeck, type StoredDeck } from './store.ts'
+import { changePlan, updateFeedback } from './feedback.ts'
 
 export interface ChatTool {
   id: string
@@ -108,6 +109,9 @@ const TOOLS = [
   'mcp__ferry__update_deck',
   'mcp__ferry__inspect_changes',
   'mcp__ferry__authoring_guide',
+  'mcp__ferry__get_feedback',
+  'mcp__ferry__resolve_feedback',
+  'mcp__ferry__reply_feedback',
   'Read',
   'Grep',
   'Glob',
@@ -126,7 +130,8 @@ Each user message starts with a bracketed note saying which slide and step they 
 - Answer questions about the slides and the code directly and concisely. Your reply renders in a narrow chat panel: short paragraphs, \`code\`, small lists; no headings or tables.
 - Read code with Read, Grep, Glob, and git (log/diff/show/blame) when it helps. Never modify repository files.
 - To change the deck, use the Ferry tools with deck_id "${deck.id}": get_deck (with slide_id) first, then update_slide with the complete revised slide; add_slides/remove_slides/reorder_slides/update_deck as needed. Call authoring_guide if unsure about slide shapes. The viewer updates live while the user watches.
-- After changing the deck, say in one sentence what changed. Ask before large restructures.`
+- After changing the deck, say in one sentence what changed. Ask before large restructures.
+- A message may carry a change plan from the viewer's Change plan tab. Apply every request, then call resolve_feedback with one reply per item ("done" with what changed, "declined" with why). If a request is unclear, ask with reply_feedback instead of guessing.`
 }
 
 function contextNote(deck: StoredDeck, context: ChatMessage['context']): string {
@@ -166,6 +171,9 @@ function toolLabel(name: string, input: Record<string, unknown> | undefined): st
     update_deck: 'Updating the deck',
     inspect_changes: 'Inspecting the git changes',
     authoring_guide: 'Reading the authoring guide',
+    get_feedback: 'Reading the change plan',
+    resolve_feedback: 'Replying to your requests',
+    reply_feedback: 'Asking you a question',
   }
   return labels[ferry] ?? ferry.replace(/_/g, ' ')
 }
@@ -179,8 +187,9 @@ function childEnv(): NodeJS.ProcessEnv {
 
 export async function sendChat(
   deckId: string,
-  input: { text: string; context?: ChatMessage['context'] },
+  input: { text: string; context?: ChatMessage['context']; /** What the agent reads instead of the displayed text. */ prompt?: string },
   emit: (event: ChatEvent) => void,
+  onDone?: () => Promise<void>,
 ): Promise<ChatMessage> {
   if (runs.has(deckId)) throw new Error('the agent is still answering — wait or press Stop')
   const claude = findClaude()
@@ -216,7 +225,7 @@ export async function sendChat(
   const child = spawn(claude, args, { cwd: repo, env: childEnv(), stdio: ['pipe', 'pipe', 'pipe'] })
   const run: Run = { child, message: reply, stopped: false }
   runs.set(deckId, run)
-  child.stdin!.end(`${contextNote(deck, user.context)}\n\n${user.text}`)
+  child.stdin!.end(input.prompt ?? `${contextNote(deck, user.context)}\n\n${user.text}`)
 
   let buffer = ''
   let stderr = ''
@@ -282,12 +291,43 @@ export async function sendChat(
     if (code === 0 || run.stopped) latest.sessionId = sessionId
     else if (/no conversation found|session/i.test(stderr)) latest.sessionId = undefined
     await saveChat(latest)
+    await onDone?.().catch(() => {})
     emit({ op: 'end', message: reply })
   })
   child.on('error', (error) => {
     stderr += String(error)
   })
   return user
+}
+
+/**
+ * Hands the open change requests to the built-in agent, for when no agent is
+ * listening with wait_for_feedback. Requests it leaves unresolved reopen when
+ * it finishes, so they can be sent again. Returns how many it took.
+ */
+export async function applyPlan(deckId: string, emit: (event: ChatEvent) => void): Promise<number> {
+  if (runs.has(deckId)) throw new Error('Claude is still answering in Chat — send the plan again when it’s done')
+  const deck = await loadDeck(deckId)
+  const taken = await updateFeedback(deckId, (data) => {
+    const open = data.items.filter((i) => i.status === 'open')
+    for (const item of open) Object.assign(item, { status: 'working', updatedAt: new Date().toISOString() })
+    return open
+  })
+  if (!taken.length) return 0
+  const ids = new Set(taken.map((i) => i.id))
+  // A request the agent asked about stays "working" until the user replies.
+  const reopen = () =>
+    updateFeedback(deckId, (data) => {
+      for (const item of data.items) if (ids.has(item.id) && item.status === 'working' && item.thread.at(-1)?.from !== 'agent') item.status = 'open'
+    })
+  const count = `${taken.length} request${taken.length === 1 ? '' : 's'}`
+  try {
+    await sendChat(deckId, { text: `Apply my change plan (${count}).`, prompt: changePlan(deck, taken, 'Finally, sum up what you changed in one or two sentences.') }, emit, reopen)
+  } catch (error) {
+    await reopen()
+    throw error
+  }
+  return taken.length
 }
 
 export function stopChat(deckId: string): boolean {

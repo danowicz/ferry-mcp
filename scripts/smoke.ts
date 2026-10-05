@@ -1,6 +1,6 @@
 // End-to-end check of every MCP tool against an isolated FERRY_HOME.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -9,7 +9,17 @@ import { createSampleRepo } from './sample-repo.ts'
 
 const home = mkdtempSync(join(tmpdir(), 'ferry-smoke-'))
 const repo = createSampleRepo()
-const { client, call } = await connect({ FERRY_HOME: home, FERRY_PORT: '4790' })
+// Stand-in for the Claude Code CLI: records what the viewer's built-in agent is asked.
+const fakeClaude = join(home, 'claude')
+const fakeLog = join(home, 'claude-call.json')
+writeFileSync(fakeClaude, `#!/usr/bin/env node
+let input = ''
+process.stdin.on('data', (d) => (input += d)).on('end', () => {
+  require('node:fs').writeFileSync(process.env.FERRY_FAKE_CLAUDE_LOG, JSON.stringify({ args: process.argv.slice(2), input }))
+  console.log(JSON.stringify({ type: 'result', result: 'ok' }))
+})
+`, { mode: 0o755 })
+const { client, call } = await connect({ FERRY_HOME: home, FERRY_PORT: '4790', FERRY_CLAUDE_BIN: fakeClaude, FERRY_FAKE_CLAUDE_LOG: fakeLog })
 const ok = (name: string) => console.log(`✓ ${name}`)
 
 const tools = (await client.listTools()).tools.map((t) => t.name)
@@ -109,6 +119,19 @@ assert.deepEqual(await fetch(chatApi).then((r) => r.json()), { messages: [], run
 assert.equal((await fetch(chatApi, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 400)
 assert.equal((await fetch(chatApi, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{"text":"hi"}' })).status, 400)
 ok('chat API guards (empty message, cross-origin)')
+
+// No agent listening: Send hands the plan to the viewer's built-in agent.
+const statusOf = async (fid: string) => (await fetch(api).then((r) => r.json())).items.find((i: { id: string }) => i.id === fid)?.status
+const queued = await post('', { text: 'Tighten the subtitle', slideId: 'bad-callout', step: 0 })
+const handed = await post('send', {})
+assert.deepEqual([handed.sent, handed.applying], [1, 1])
+for (let i = 0; i < 50 && (await statusOf(queued.id)) !== 'open'; i++) await new Promise((resolve) => setTimeout(resolve, 100))
+assert.equal(await statusOf(queued.id), 'open') // the stand-in resolved nothing, so the request reopens
+const asked = JSON.parse(readFileSync(fakeLog, 'utf8'))
+assert.ok(asked.input.includes(`[${queued.id}] Slide 1 "Bad callout"`) && asked.input.includes('sum up what you changed'))
+assert.ok(asked.args.includes('mcp__ferry__resolve_feedback'))
+assert.match((await fetch(chatApi).then((r) => r.json())).messages[0].text, /Apply my change plan \(1 request\)/)
+ok('Send with no agent listening hands the plan to the built-in agent; unresolved requests reopen')
 
 const deckApi = new URL(`/api/decks/${id}`, url)
 assert.equal((await fetch(deckApi, { method: 'DELETE' })).status, 400)
