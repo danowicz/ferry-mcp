@@ -4,7 +4,7 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { ferryHome, type StoredDeck } from './store.ts'
+import { deckGit, ferryHome, type StoredDeck } from './store.ts'
 
 export type FeedbackStatus = 'draft' | 'open' | 'working' | 'done' | 'declined'
 
@@ -121,7 +121,7 @@ export async function isListening(deckId: string): Promise<boolean> {
   return !!info && Date.now() - info.mtimeMs < 8000
 }
 
-// ── agent-facing change plan ──────────────────────────────────────────────
+// ── agent-facing change plan: code changes requested while reviewing ──────
 
 const pending = (item: FeedbackItem) => item.status === 'open' || item.status === 'working'
 
@@ -151,11 +151,14 @@ export function changePlan(deck: StoredDeck, items: FeedbackItem[], then = 'Fina
     const source = deck.source.find((s) => s.id === id)
     return source ? [`[${id}]\n${JSON.stringify(source)}`] : []
   })
+  const { repo, base, head } = deckGit(deck)
+  const range = base || head ? `${base ?? 'HEAD'} → ${head ?? 'working tree'}` : 'its changes'
+  const branch = head ? ` Check that ${head} is checked out first; if it isn't, ask with reply_feedback before editing.` : ''
   return [
-    `Change plan for deck "${deck.title}" (${deck.id}) — ${list.length} request${list.length === 1 ? '' : 's'} from the viewer:`,
+    `Code change plan from reviewing deck "${deck.title}" (${deck.id}) — ${list.length} request${list.length === 1 ? '' : 's'} from the Ferry viewer. The deck explains ${range} in ${repo ?? 'the repository it was built from'}. These are changes to that codebase, not to the slides.`,
     list.map((item, i) => describeItem(deck, item, i + 1)).join('\n\n'),
-    sources.length ? `Current authoring JSON of the slides involved:\n${sources.join('\n\n')}` : '',
-    'Next: apply each request (update_slide takes the complete slide; add_slides/remove_slides/reorder_slides as needed). Then call resolve_feedback with a one-line reply per item — "done" with what changed, or "declined" with why. Ask with reply_feedback if a request is unclear. ' + then,
+    sources.length ? `Authoring JSON of the slides the requests point at (use it to find the code):\n${sources.join('\n\n')}` : '',
+    `Next: make each change in the code, on the checked-out branch, without committing.${branch} Leave the slides alone. Then call resolve_feedback with a one-line reply per item — "done" with what changed (which files), or "declined" with why. Ask with reply_feedback if a request is unclear. ${then}`,
   ]
     .filter(Boolean)
     .join('\n\n')

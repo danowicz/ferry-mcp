@@ -120,7 +120,7 @@ export class FeedbackPanel {
     this.sendButton.addEventListener('click', () => this.send())
     const copy = h('button', { class: 'fb-copy', title: 'Copy the change plan as a prompt for any agent', html: `${icon('file', 14)}<span>Copy as prompt</span>` })
     copy.addEventListener('click', () => this.copy())
-    const addToPlan = h('button', { class: 'fb-copy', title: 'Queue this as a request for the agent that built the deck', html: `${icon('notes', 14)}<span>Add to plan</span>` })
+    const addToPlan = h('button', { class: 'fb-copy', title: 'Queue this as a code change in the change plan', html: `${icon('notes', 14)}<span>Add to plan</span>` })
     addToPlan.addEventListener('click', () => this.add(false))
     this.chatTab.addEventListener('click', () => this.setTab('chat'))
     this.planTab.addEventListener('click', () => this.setTab('plan'))
@@ -379,7 +379,7 @@ export class FeedbackPanel {
     await this.refresh()
     const requests = (n: number) => `${n} request${n === 1 ? '' : 's'}`
     if (result.error) this.host.flash(result.error)
-    else if (result.applying) this.host.flash(`Claude is applying ${requests(result.applying)} · follow along in Chat`)
+    else if (result.applying) this.host.flash(`Claude is making ${requests(result.applying)} in the code · follow along in Chat`)
     else if (result.sent) this.host.flash(`Sent ${requests(result.sent)} to the agent`)
   }
 
@@ -401,7 +401,7 @@ export class FeedbackPanel {
       const where = index >= 0 ? `slide ${index + 1} (${item.slideId}), step ${(item.step ?? 0) + 1}` : 'whole deck'
       return `${n + 1}. [${item.id}] ${where}${item.target ? ` — pinned to ${item.target.kind}: ${item.target.label}` : ''}\n   ${item.text}`
     })
-    const prompt = `Apply my feedback on the Ferry deck "${deck.title}" (deck_id: ${deck.id}). Call get_feedback with that deck_id for the full change plan, update the slides, then resolve_feedback with a short reply per item.${lines.length ? `\n\n${lines.join('\n')}` : ''}`
+    const prompt = `Make the code changes I asked for while reviewing the Ferry deck "${deck.title}" (deck_id: ${deck.id}). Call get_feedback with that deck_id for the full change plan, change the code in the repository (not the slides), then resolve_feedback with a short reply per item.${lines.length ? `\n\n${lines.join('\n')}` : ''}`
     navigator.clipboard?.writeText(prompt).then(
       () => this.host.flash('Copied — paste it into your agent'),
       () => this.host.flash('Could not copy to the clipboard'),
@@ -447,10 +447,10 @@ export class FeedbackPanel {
           ? `Ask about this ${this.target.kind}…`
           : 'Ask anything, or ask for a change…'
         : this.deckWide
-          ? 'Ask for a change to the whole deck…'
+          ? 'Describe a code change for this branch…'
           : this.target
-            ? `Comment on this ${this.target.kind}…`
-            : 'Ask for a change on this slide…'
+            ? `What should change in this ${this.target.kind}?`
+            : 'What should change in the code shown here?'
   }
 
   private renderPresence() {
@@ -460,8 +460,8 @@ export class FeedbackPanel {
     this.presence.innerHTML = this.listening
       ? '<i></i><span><b>Agent is listening</b> — send your plan and it starts working.</span>'
       : working
-        ? `<i></i><span><b>Agent is working</b> on ${working} request${working === 1 ? '' : 's'}. Slides update here as it goes.</span>`
-        : '<i></i><span><b>Send</b> hands the plan to Claude here: it edits the slides and replies to each request. To use your own agent instead, Copy as prompt.</span>'
+        ? `<i></i><span><b>Agent is working</b> on ${working} code change${working === 1 ? '' : 's'}. It replies here as each one is done.</span>`
+        : '<i></i><span><b>Send</b> hands the plan to Claude here: it makes the code changes in your repository and replies to each request. To use your own agent instead, Copy as prompt.</span>'
   }
 
   private render() {
@@ -474,7 +474,7 @@ export class FeedbackPanel {
     const queued = this.listening || this.running ? 0 : this.items.filter((i) => i.status === 'open').length
     const pending = this.items.filter((i) => i.text && ['draft', 'open', 'working'].includes(i.status)).length
     this.planTab.innerHTML = `${icon('notes', 14)}<span>Change plan</span>${pending ? `<em>${pending}</em>` : ''}`
-    this.planTab.title = 'Requests queued for the agent that built the deck'
+    this.planTab.title = 'Code changes to send to an agent'
     this.sendButton.innerHTML = `${icon('arrow', 15)}<span>Send to agent${drafts + queued ? ` · ${drafts + queued}` : ''}</span>`
     this.sendButton.toggleAttribute('disabled', drafts + queued === 0)
 
@@ -485,8 +485,8 @@ export class FeedbackPanel {
         h(
           'div',
           { class: 'fb-empty' },
-          h('b', {}, this.onlyHere ? 'No feedback on this slide yet' : 'No feedback yet'),
-          h('p', { html: 'Write what should change below. Use <b>Pin</b> to point at a code line, node or row. Comments collect into a <em>change plan</em> you send to the agent.' }),
+          h('b', {}, this.onlyHere ? 'No change requests on this slide yet' : 'No change requests yet'),
+          h('p', { html: 'Write what should change in the code below. Use <b>Pin</b> to point at a code line, node or row. Requests collect into a <em>change plan</em> an agent makes in your repository.' }),
         ),
       )
     }

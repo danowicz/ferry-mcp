@@ -4,7 +4,7 @@ Workflow:
 1. inspect_changes (repo, base, head) to see changed files and their numbered changes.
 2. create_deck, then add_slides with a story: title → points overview → per key change: behavior (sequence or flow) then code (diff with steps, focus, callouts) → points checklist for review.
 3. open_deck to show it. Fix any warnings returned by add_slides.
-4. Review loop: call wait_for_feedback. The user comments on slides in the viewer (C key) and sends a change plan; apply it, resolve_feedback with a reply per item, and wait again until they're done.
+4. Review loop: call wait_for_feedback. The user reviews the code in the viewer (C key) and sends a change plan: code changes for the repository. Make them in the code, resolve_feedback with a reply per item, and wait again until they're done.
 Shortcut: draft_deck_from_git builds a skeleton deck that you then refine with update_slide.
 Call authoring_guide once for slide types and craft rules.`
 
@@ -115,11 +115,11 @@ Edge ids are "from->to". Elements listed in a step's \`show\` are hidden until t
 
 ## Review loop
 
-People review decks in the viewer: **C** opens the feedback panel, the crosshair pins a comment to a code line, node, row, or any element, and comments collect into a *change plan* they send to you.
+People review the change through the deck: **C** opens the feedback panel, the crosshair pins a comment to a code line, node, row, or any element, and comments collect into a *change plan* they send to you. A change plan asks for **code changes** in the repository the deck explains, not slide edits (slide edits happen in the viewer's Chat tab).
 
 1. \`wait_for_feedback\` blocks until a plan arrives (the viewer shows that you are listening) and returns each request with its slide, step, pinned element, and the slide's authoring JSON. \`get_feedback\` returns pending requests without waiting.
-2. Apply each request — usually \`update_slide\` with the complete revised slide.
-3. \`resolve_feedback\` with a one-line reply per item ("done": what changed; "declined": why). Replies appear in the viewer chat next to the request.
+2. Make each change in the code, on the checked-out branch, without committing. The slide, step, and pinned element tell you where the reviewer was looking.
+3. \`resolve_feedback\` with a one-line reply per item ("done": what changed, which files; "declined": why). Replies appear in the viewer next to the request.
 4. If a request is ambiguous, \`reply_feedback\` asks the user; their answer comes back through \`wait_for_feedback\`.
 5. Call \`wait_for_feedback\` again until the user is happy or it times out.
 

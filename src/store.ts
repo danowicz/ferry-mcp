@@ -1,6 +1,7 @@
+import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { compileSlide } from './compile.ts'
 import type { CompiledDeck, SectionSlide, Slide, ThemeName } from './model.ts'
@@ -52,6 +53,16 @@ export async function deleteDeck(id: string): Promise<void> {
   const home = ferryHome()
   const extras = [join(home, 'feedback', `${id}.json`), join(home, 'feedback', `${id}.listening`), join(home, 'chat', `${id}.json`)]
   await Promise.all(extras.map((path) => rm(path, { force: true })))
+}
+
+/** The local repository and range a deck explains: its first git source, else its repo field when that is a path. */
+export function deckGit(deck: StoredDeck): { repo?: string; base?: string; head?: string } {
+  for (const slide of deck.source) {
+    const git = (slide as { git?: { repo?: string; base?: string; head?: string } }).git
+    if (git?.repo && isAbsolute(git.repo) && existsSync(git.repo)) return { repo: git.repo, base: git.base, head: git.head }
+  }
+  if (deck.repo && isAbsolute(deck.repo) && existsSync(deck.repo)) return { repo: deck.repo }
+  return {}
 }
 
 export type DeckSummary = Omit<CompiledDeck, 'slides'> & { slideCount: number; firstSlide?: string }

@@ -400,7 +400,7 @@ export function createMcpServer(): McpServer {
     {
       title: 'Wait for feedback',
       description:
-        "Wait until the user sends a change plan from the viewer's feedback panel (C key), then return it: each request with its slide, step, pinned element, and the slide's authoring JSON. Returns at once if requests are already pending. The viewer shows the user that you are listening. Apply the requests, resolve_feedback, then call this again to keep reviewing together.",
+        "Wait until the user sends a change plan from the viewer's feedback panel (C key), then return it: code changes they want in the repository the deck explains, each with the slide, step and pinned element (often a code line) it was written on, plus the slide's authoring JSON. Returns at once if requests are already pending. The viewer shows the user that you are listening. Make the changes in the code (not the slides), resolve_feedback, then call this again to keep reviewing together.",
       inputSchema: {
         deck_id: z.string(),
         timeout_seconds: z.number().int().min(5).max(3600).optional().describe('How long to wait (default 300). On timeout, tell the user how to send feedback, or wait again.'),
@@ -441,7 +441,7 @@ export function createMcpServer(): McpServer {
     'get_feedback',
     {
       title: 'Get feedback',
-      description: 'Return pending change requests left in the viewer (without waiting) and mark them as being worked on. Use when the user says they left feedback.',
+      description: 'Return the pending change plan left in the viewer (without waiting) and mark it as being worked on: code changes to make in the repository the deck explains. Use when the user says they left feedback.',
       inputSchema: { deck_id: z.string() },
     },
     tool(async ({ deck_id }) => (await claim(await loadDeck(deck_id))).plan),
@@ -451,7 +451,7 @@ export function createMcpServer(): McpServer {
     'resolve_feedback',
     {
       title: 'Resolve feedback',
-      description: 'Close change requests after applying them. Each reply appears in the viewer chat next to the request.',
+      description: 'Close change requests after making the code changes (or declining them). Each reply appears in the viewer next to the request.',
       inputSchema: {
         deck_id: z.string(),
         items: z
@@ -541,7 +541,7 @@ export function createMcpServer(): McpServer {
 2. Decide the story: the problem, the 2–5 key changes, and what reviewers must check.
 3. create_deck, then add_slides: title (with git stats) → points overview → for each key change a sequence or flow slide showing behavior before/after, then a diff slide with one idea per step, notes, focus, and callouts → metrics if any → a checklist of review focus, risks, and tests.
 4. Fix all warnings, then open_deck and tell the user the URL and the keys (→ ← ↑ ↓, O overview, C feedback).
-5. Review together: call wait_for_feedback, apply each change plan the user sends from the viewer, resolve_feedback with short replies, and wait again until they are done.`,
+5. Review together: call wait_for_feedback. Each change plan the user sends from the viewer lists code changes: make them in the repository, resolve_feedback with short replies, and wait again until they are done.`,
           },
         },
       ],

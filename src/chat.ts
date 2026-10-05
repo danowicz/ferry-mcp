@@ -5,10 +5,10 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { ROOT } from './build.ts'
-import { ferryHome, loadDeck, type StoredDeck } from './store.ts'
+import { deckGit, ferryHome, loadDeck, type StoredDeck } from './store.ts'
 import { changePlan, updateFeedback } from './feedback.ts'
 
 export interface ChatTool {
@@ -32,6 +32,8 @@ export interface ChatMessage {
 export interface ChatLog {
   deckId: string
   sessionId?: string
+  /** Change-plan runs keep their own Claude Code session: they may edit code, chat may not. */
+  planSessionId?: string
   messages: ChatMessage[]
 }
 
@@ -90,38 +92,32 @@ function findClaude(): string | null {
   return claudeBin
 }
 
-/** The repository the deck explains: the first git source, else the home directory. */
-function repoOf(deck: StoredDeck): string {
-  for (const slide of deck.source) {
-    const git = (slide as { git?: { repo?: string } }).git
-    if (git?.repo && isAbsolute(git.repo) && existsSync(git.repo)) return git.repo
-  }
-  if (deck.repo && isAbsolute(deck.repo) && existsSync(deck.repo)) return deck.repo
-  return homedir()
+const READ = ['Read', 'Grep', 'Glob', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(git show:*)', 'Bash(git status:*)', 'Bash(git blame:*)', 'Bash(git branch --show-current)']
+const DECK = ['mcp__ferry__update_slide', 'mcp__ferry__add_slides', 'mcp__ferry__remove_slides', 'mcp__ferry__reorder_slides', 'mcp__ferry__update_deck']
+const NEVER = ['NotebookEdit', 'mcp__ferry__wait_for_feedback', 'mcp__ferry__open_deck', 'mcp__ferry__draft_deck_from_git', 'mcp__ferry__create_deck', 'mcp__ferry__export_deck', 'mcp__ferry__delete_deck']
+
+type Mode = 'chat' | 'plan'
+/** Chat answers questions and edits the deck; a change plan edits the code and leaves the deck alone. */
+const MODES: Record<Mode, { tools: string[]; denied: string[]; prompt: (deck: StoredDeck, repo: string) => string }> = {
+  chat: {
+    tools: ['mcp__ferry__get_deck', ...DECK, 'mcp__ferry__inspect_changes', 'mcp__ferry__authoring_guide', ...READ],
+    denied: ['Edit', 'Write', ...NEVER],
+    prompt: systemPrompt,
+  },
+  plan: {
+    tools: ['Edit', 'Write', 'mcp__ferry__get_deck', 'mcp__ferry__get_feedback', 'mcp__ferry__resolve_feedback', 'mcp__ferry__reply_feedback', ...READ],
+    denied: [...DECK, ...NEVER],
+    prompt: planPrompt,
+  },
 }
 
-const TOOLS = [
-  'mcp__ferry__get_deck',
-  'mcp__ferry__update_slide',
-  'mcp__ferry__add_slides',
-  'mcp__ferry__remove_slides',
-  'mcp__ferry__reorder_slides',
-  'mcp__ferry__update_deck',
-  'mcp__ferry__inspect_changes',
-  'mcp__ferry__authoring_guide',
-  'mcp__ferry__get_feedback',
-  'mcp__ferry__resolve_feedback',
-  'mcp__ferry__reply_feedback',
-  'Read',
-  'Grep',
-  'Glob',
-  'Bash(git log:*)',
-  'Bash(git diff:*)',
-  'Bash(git show:*)',
-  'Bash(git status:*)',
-  'Bash(git blame:*)',
-]
-const DENIED = ['Edit', 'Write', 'NotebookEdit', 'mcp__ferry__wait_for_feedback', 'mcp__ferry__open_deck', 'mcp__ferry__draft_deck_from_git', 'mcp__ferry__create_deck', 'mcp__ferry__export_deck']
+function planPrompt(deck: StoredDeck, repo: string): string {
+  return `You are Ferry's built-in agent. A reviewer of the deck "${deck.title}" (deck_id: ${deck.id}) sent a change plan from the Ferry viewer: changes to make in the codebase at ${repo}.
+- Make each change with Edit and Write. Read code with Read, Grep, Glob, and git (log/diff/show/status/blame). Keep changes minimal and in the style of the surrounding code.
+- Never commit or push, never touch files outside the repository, and don't change the slides.
+- Resolve each request with resolve_feedback: "done" with the files you changed, or "declined" with why. If a request is unclear, ask with reply_feedback instead of guessing.
+- Your final message renders in a narrow chat panel: sum up the code changes in one or two sentences.`
+}
 
 function systemPrompt(deck: StoredDeck, repo: string): string {
   return `You are Ferry's built-in assistant, chatting with the user inside the Ferry presentation viewer while they review the deck "${deck.title}" (deck_id: ${deck.id}). The repository it explains is ${repo}.
@@ -131,7 +127,7 @@ Each user message starts with a bracketed note saying which slide and step they 
 - Read code with Read, Grep, Glob, and git (log/diff/show/blame) when it helps. Never modify repository files.
 - To change the deck, use the Ferry tools with deck_id "${deck.id}": get_deck (with slide_id) first, then update_slide with the complete revised slide; add_slides/remove_slides/reorder_slides/update_deck as needed. Call authoring_guide if unsure about slide shapes. The viewer updates live while the user watches.
 - After changing the deck, say in one sentence what changed. Ask before large restructures.
-- A message may carry a change plan from the viewer's Change plan tab. Apply every request, then call resolve_feedback with one reply per item ("done" with what changed, "declined" with why). If a request is unclear, ask with reply_feedback instead of guessing.`
+- Code changes go through the Change plan tab, not this chat: if asked to change the code, suggest adding it to the plan.`
 }
 
 function contextNote(deck: StoredDeck, context: ChatMessage['context']): string {
@@ -156,6 +152,10 @@ function toolLabel(name: string, input: Record<string, unknown> | undefined): st
       return `Searching for “${String(input?.pattern ?? '').slice(0, 40)}”`
     case 'Glob':
       return `Finding ${String(input?.pattern ?? 'files')}`
+    case 'Edit':
+      return `Editing ${file || 'a file'}`
+    case 'Write':
+      return `Writing ${file || 'a file'}`
     case 'Bash':
       return `Running ${String(input?.command ?? 'git').slice(0, 48)}`
     case 'ToolSearch':
@@ -187,7 +187,7 @@ function childEnv(): NodeJS.ProcessEnv {
 
 export async function sendChat(
   deckId: string,
-  input: { text: string; context?: ChatMessage['context']; /** What the agent reads instead of the displayed text. */ prompt?: string },
+  input: { text: string; context?: ChatMessage['context']; /** What the agent reads instead of the displayed text. */ prompt?: string; mode?: Mode },
   emit: (event: ChatEvent) => void,
   onDone?: () => Promise<void>,
 ): Promise<ChatMessage> {
@@ -205,8 +205,10 @@ export async function sendChat(
   emit({ op: 'message', message: user })
   emit({ op: 'message', message: reply })
 
-  const repo = repoOf(deck)
-  const resume = log.sessionId
+  const repo = deckGit(deck).repo ?? homedir()
+  const mode = MODES[input.mode ?? 'chat']
+  const key = input.mode === 'plan' ? 'planSessionId' : 'sessionId'
+  const resume = log[key]
   const sessionId = resume ?? randomUUID()
   const mcp = JSON.stringify({ mcpServers: { ferry: { command: process.execPath, args: [join(ROOT, 'bin', 'ferry.js')] } } })
   const args = [
@@ -216,9 +218,9 @@ export async function sendChat(
     '--include-partial-messages',
     '--strict-mcp-config',
     '--mcp-config', mcp,
-    '--append-system-prompt', systemPrompt(deck, repo),
-    '--allowedTools', ...TOOLS,
-    '--disallowedTools', ...DENIED,
+    '--append-system-prompt', mode.prompt(deck, repo),
+    '--allowedTools', ...mode.tools,
+    '--disallowedTools', ...mode.denied,
     ...(resume ? ['--resume', resume] : ['--session-id', sessionId]),
     ...(process.env.FERRY_CHAT_MODEL ? ['--model', process.env.FERRY_CHAT_MODEL] : []),
   ]
@@ -288,8 +290,8 @@ export async function sendChat(
     const latest = await loadChat(deckId)
     latest.messages.push(reply)
     // Keep the session only once it exists; a failed resume starts fresh next time.
-    if (code === 0 || run.stopped) latest.sessionId = sessionId
-    else if (/no conversation found|session/i.test(stderr)) latest.sessionId = undefined
+    if (code === 0 || run.stopped) latest[key] = sessionId
+    else if (/no conversation found|session/i.test(stderr)) latest[key] = undefined
     await saveChat(latest)
     await onDone?.().catch(() => {})
     emit({ op: 'end', message: reply })
@@ -322,7 +324,7 @@ export async function applyPlan(deckId: string, emit: (event: ChatEvent) => void
     })
   const count = `${taken.length} request${taken.length === 1 ? '' : 's'}`
   try {
-    await sendChat(deckId, { text: `Apply my change plan (${count}).`, prompt: changePlan(deck, taken, 'Finally, sum up what you changed in one or two sentences.') }, emit, reopen)
+    await sendChat(deckId, { text: `Make the code changes in my plan (${count}).`, prompt: changePlan(deck, taken, 'Finally, sum up the code changes in one or two sentences.'), mode: 'plan' }, emit, reopen)
   } catch (error) {
     await reopen()
     throw error

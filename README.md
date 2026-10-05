@@ -78,18 +78,20 @@ Press **C** in the viewer. The **Chat** tab is a conversation with a Claude Code
 - The agent runs headless (`claude -p`) in the deck's repository, using your existing Claude Code login. It can read the code (Read, Grep, Glob, read-only git) and edit the deck through Ferry's tools. It never modifies repository files.
 - Replies stream into the panel along with what the agent is doing ("Reading bind.ts", "Updating slide…"). Slide edits appear live.
 - The conversation continues across messages (one Claude Code session per deck). **New chat** starts over, and **Stop** interrupts.
-- **Add to plan** turns your text into a change request for the agent that built the deck, instead of the chat agent.
+- **Add to plan** turns your text into a code change in the change plan, instead of asking the chat agent.
 
 Set `FERRY_CHAT_MODEL` to pick a model (e.g. `sonnet` for faster replies), or `FERRY_CLAUDE_BIN` if `claude` isn't on your PATH. Chat logs are stored in `~/.ferry/chat/`.
 
 ## Review together (change plans)
 
-The **Change plan** tab queues requests for an agent to apply: *your* agent, the one that built the deck in your Claude Code session, or Ferry's built-in one when yours isn't listening:
+The **Change plan** tab collects the **code changes** you want while reviewing: "rename this", "handle the timeout here", "add a test for this case". An agent makes them in the repository the deck explains. That's *your* agent, the one that built the deck in your Claude Code session, or Ferry's built-in one when yours isn't listening:
 
-1. **Comment** on the current slide and step, or switch the chip to *Whole deck*. **Pin** (or **P**) lets you click any element to anchor the comment: a code line, callout, node, edge, sequence row, point, metric or file.
-2. Each comment becomes a **draft** in the change plan. **Send to agent** delivers the whole plan (⌘↵ sends right away).
-3. If the agent called `wait_for_feedback`, the panel shows **Agent is listening**, and the agent gets the plan immediately: every request with its slide, step, pinned element and the slide's authoring JSON. If no agent is listening, **Send to agent** hands the plan to the built-in agent (the one behind the Chat tab): it edits the slides and replies to each request, and you can follow along in Chat. Requests it doesn't resolve go back to the plan so you can send them again. To use your own agent instead, tell it "apply my Ferry feedback", or use **Copy as prompt**.
-4. The agent edits the slides (they update live), then replies per request. Replies appear in the chat as **Done** or **Declined**. Reply under any request to reopen it. The agent can also ask you questions in the thread.
+1. **Write a request** on the current slide and step, or switch the chip to *Whole deck*. **Pin** (or **P**) lets you click any element to anchor it: a code line, callout, node, edge, sequence row, point, metric or file. The agent uses that to find the code.
+2. Each request becomes a **draft** in the change plan. **Send to agent** delivers the whole plan (⌘↵ sends right away).
+3. If the agent called `wait_for_feedback`, the panel shows **Agent is listening**, and the agent gets the plan immediately: every request with its slide, step, pinned element and the slide's authoring JSON. If no agent is listening, **Send to agent** hands the plan to Claude Code running in the viewer. It edits the code in the deck's repository (on the checked-out branch, never committing), and you can follow along in the Chat tab. Requests it doesn't resolve go back to the plan so you can send them again. To use your own agent instead, tell it "apply my Ferry feedback", or use **Copy as prompt**.
+4. The agent makes the code changes, then replies per request with what it changed. Replies appear as **Done** or **Declined**. Reply under any request to reopen it. The agent can also ask you questions in the thread. Review the result with `git diff` as usual.
+
+Slide edits don't go through the plan: ask for them in the **Chat** tab.
 
 Slides with open requests get a dot on the progress bar. Feedback is stored in `~/.ferry/feedback/`. The viewer only accepts JSON requests from localhost pages, so other websites can't inject instructions for your agent.
 
